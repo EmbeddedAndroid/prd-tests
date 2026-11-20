@@ -1,0 +1,259 @@
+# Generic product: one requirement per generic test, so every test runs on
+# every board and the results form the test x platform matrix. The
+# board codec is the one the virtual board has (FWHT, vicodec); real
+# boards answer the H.264 rows. See README.md.
+product: generic
+title: Every generic test once
+areas: {GDS: display, GAU: audio, GVI: video, GCA: camera, GPL: platform}
+requirements:
+  GDS-001:
+    title: "Atomic KMS device"
+    test: display.kms
+  GDS-002:
+    title: "Primary connector and sink"
+    test: display.connector
+    args: {connector: primary}
+  GDS-003:
+    title: "Mode set on the primary connector"
+    test: display.modeset
+    args: {connector: primary}
+  GDS-004:
+    title: "Every sink mode passes the atomic check"
+    test: display.modes
+    args: {connector: primary}
+  GDS-005:
+    title: "EDID of the primary sink"
+    test: display.edid
+    args: {connector: primary}
+  GDS-006:
+    title: "Hot plug detection on the primary connector"
+    test: display.hotplug
+    args: {connector: primary}
+  GDS-007:
+    title: "Writeback capture"
+    test: display.writeback
+  GDS-008:
+    title: "Layers on one CRTC"
+    test: display.layers
+  GDS-009:
+    title: "Source cropping"
+    test: display.crop
+  GDS-010:
+    title: "Scaling"
+    test: display.scale
+  GDS-011:
+    title: "Layer position"
+    test: display.position
+  GDS-012:
+    title: "Blend order (zpos)"
+    test: display.zorder
+  GDS-013:
+    title: "Alpha blending modes"
+    test: display.alpha
+  GDS-014:
+    title: "YUV to RGB conversion"
+    test: display.csc
+  GDS-015:
+    title: "Plane input formats"
+    test: display.formats
+  GDS-016:
+    title: "Writeback output formats"
+    test: display.wb_formats
+  GDS-017:
+    title: "Maximum frame width"
+    test: display.max_width
+  GDS-018:
+    title: "Rotation and reflection"
+    test: display.rotation
+  GDS-019:
+    title: "Non-linear framebuffer modifiers"
+    test: display.modifiers
+  GDS-020:
+    title: "Gamma LUT"
+    test: display.crtc_lut
+    args: {prop: GAMMA_LUT}
+  GDS-021:
+    title: "Degamma LUT"
+    test: display.crtc_lut
+    args: {prop: DEGAMMA_LUT}
+  GDS-022:
+    title: "Colour transform matrix"
+    test: display.crtc_lut
+    args: {prop: CTM}
+  GDS-023:
+    title: "Output colour depth (max bpc)"
+    test: display.connector_property
+    args: {commit: true, connector: primary, feature: Colour depth, names: [max bpc]}
+  GDS-024:
+    title: "Variable refresh rate"
+    test: display.vrr
+  GDS-025:
+    title: "Writeback of an active display"
+    test: display.clone_writeback
+    args: {connector: primary}
+  GDS-026:
+    title: "Two displays at once"
+    test: display.multi
+    args: {n: 2}
+  GDS-027:
+    title: "Backlight brightness"
+    test: display.backlight
+  GDS-028:
+    title: "Touch input"
+    test: display.touch
+  GDS-029:
+    title: "Boot loader framebuffer hand-off"
+    test: display.boot_handoff
+  GDS-030:
+    title: "Wayland compositor with EGL"
+    test: display.wayland_gl
+  GAU-001:
+    title: "Sound card with playback and capture"
+    test: audio.cards
+  GAU-002:
+    title: "Playback PCM capabilities"
+    test: audio.pcm_caps
+    args: {direction: playback}
+  GAU-003:
+    title: "Capture PCM capabilities"
+    test: audio.pcm_caps
+    args: {direction: capture}
+  GAU-004:
+    title: "Compress offload (MP3)"
+    test: audio.compress_codec
+    args: {codec: MP3}
+  GAU-005:
+    title: "UCM configuration"
+    test: audio.ucm
+  GAU-006:
+    title: "PipeWire sinks and sources"
+    test: audio.pipewire
+  GAU-007:
+    title: "Shell loopback case"
+    test: audio.case
+    args: {case: loopback}
+  GAU-008:
+    title: "Audio DSP restart"
+    test: audio.ssr
+  GAU-009:
+    title: "Two playback streams mixed"
+    test: audio.concurrent_play
+  GAU-010:
+    title: "Pause and resume"
+    test: audio.pause_resume
+    args: {pause_s: 10}
+  GAU-011:
+    title: "Soft volume stepping"
+    test: audio.soft_step
+  GAU-012:
+    title: "Cold output latency"
+    test: audio.output_latency
+    args: {kind: cold}
+  GAU-013:
+    title: "Restart output latency"
+    test: audio.output_latency
+    args: {kind: restart}
+  GAU-014:
+    title: "Playback buffer latency"
+    test: audio.buffer_latency
+    args: {direction: playback}
+  GAU-015:
+    title: "Capture buffer latency"
+    test: audio.buffer_latency
+    args: {direction: capture}
+  GAU-016:
+    title: "Cold capture start"
+    test: audio.capture_start
+  GAU-017:
+    title: "Round trip latency (alsabat)"
+    test: audio.roundtrip
+  GAU-018:
+    title: "Route switch latency"
+    test: audio.switch_latency
+  GAU-019:
+    title: "Audio clock against the system clock"
+    test: audio.clock_drift
+    args: {seconds: 10}
+  GAU-020:
+    title: "Analog quality KPI"
+    test: audio.quality
+    args: {what: playback THD+N}
+  GVI-001:
+    title: "V4L2 decoder for the board codec"
+    test: video.codec
+    args: {codec: FWHT, role: decoder}
+  GVI-002:
+    title: "V4L2 encoder for the board codec"
+    test: video.codec
+    args: {codec: FWHT, role: encoder}
+  GVI-003:
+    title: "Decoder raw formats"
+    test: video.raw_formats
+    args: {codec: FWHT, role: decoder}
+  GVI-004:
+    title: "Encoder raw formats"
+    test: video.raw_formats
+    args: {codec: FWHT, role: encoder}
+  GVI-005:
+    title: "Encode and decode with v4l2-ctl"
+    test: video.v4l2ctl_roundtrip
+  GVI-006:
+    title: "H.264 decoder"
+    test: video.codec
+    args: {codec: H264, role: decoder}
+  GVI-007:
+    title: "H.264 encode and decode with GStreamer"
+    test: video.roundtrip
+    args: {codec: H264}
+  GVI-008:
+    title: "H.264 conformance vector"
+    test: video.decode_vector
+    args: {codec: H264, vector: BA1_Sony_D.jsv}
+  GVI-009:
+    title: "GStreamer container and streaming elements"
+    test: video.gst_elements
+    args: {names: [qtdemux, matroskademux, mpegtsmux, tsdemux, rtpbin]}
+  GCA-001:
+    title: "Media graph with a sensor"
+    test: camera.graph
+  GCA-002:
+    title: "Raw capture through the media graph"
+    test: camera.raw_capture
+  GCA-003:
+    title: "V4L2 capture node"
+    test: camera.v4l2_capture
+  GCA-004:
+    title: "libcamera capture"
+    test: camera.libcamera
+    args: {height: 480, width: 640}
+  GCA-005:
+    title: "GStreamer libcamerasrc"
+    test: camera.libcamerasrc
+  GPL-001:
+    title: "DRM drivers in tree"
+    test: platform.in_tree
+    args: {cls: drm}
+  GPL-002:
+    title: "Sound drivers in tree"
+    test: platform.in_tree
+    args: {cls: sound}
+  GPL-003:
+    title: "Video drivers in tree"
+    test: platform.in_tree
+    args: {cls: video4linux}
+  GPL-004:
+    title: "Remote processors running"
+    test: platform.remoteproc
+  GPL-005:
+    title: "TEE device"
+    test: platform.tee
+  GPL-006:
+    title: "TPM 2.0 random numbers"
+    test: platform.tpm
+  GPL-007:
+    title: "Thermal zones"
+    test: platform.thermal
+  GPL-008:
+    title: "Low power statistics"
+    test: platform.sleep_stat
+    args: {pattern: .}

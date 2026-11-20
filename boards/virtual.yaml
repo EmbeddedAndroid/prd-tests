@@ -1,0 +1,69 @@
+# Virtual board: Linux virtual drivers in a QEMU VM (tools/vm/run.sh):
+# vkms (KMS with overlay, cursor and writeback planes), vimc (media
+# controller camera pipeline), vicodec (FWHT stateful codec), vivid
+# (V4L2 capture), snd-aloop (ALSA loopback card), swtpm (TPM 2.0), and
+# Weston on vkms with the Mesa software renderer.
+name: virtual
+
+display:
+  primary: Virtual
+  # no systemd in the VM: the runner starts Weston itself
+  compositor_cmd: >-
+    mkdir -p /tmp/prd-xdg && chmod 700 /tmp/prd-xdg &&
+    XDG_RUNTIME_DIR=/tmp/prd-xdg exec seatd-launch -- weston --backend=drm
+    --socket=wayland-1 --continue-without-input --log=/tmp/prd-weston.log
+  wayland: {runtime_dir: /tmp/prd-xdg, display: wayland-1}
+  software_gl: true
+
+audio:
+  card: Loopback
+  # snd-aloop: what plays on device 0 is captured on device 1
+  play: {device: 0}
+  capture: {device: 1}
+  loopback: {freq: 1000, min_db: 15}
+
+camera:
+  raw:
+    setup:
+      - '-V ''"Sensor A":0[fmt:SBGGR8_1X8/640x480]'''
+    video: Raw Capture 0
+    pixelformat: BA81
+    width: 640
+    height: 480
+
+platform: {}
+
+# What a QEMU virt machine and these drivers do not provide.
+absent:
+  HDMI-A: the VM has only the vkms virtual connector
+  DP: the VM has only the vkms virtual connector
+  DSI: the VM has only the vkms virtual connector
+  edid: the vkms connector reports no EDID
+  displays-2: vkms is set up with one output
+  displays-3: vkms is set up with one output
+  backlight: no panel in the VM
+  touch: no touch device in the VM
+  audio-analyzer: a loopback card has no analog path to measure
+  audio-dsp: no audio DSP in the VM
+  audio-play2: snd-aloop substreams are separate loops, not mixed
+  audio-mute: snd-aloop has no mute route
+  audio-volume: snd-aloop has no volume control
+  audio-routes: no shell audio cases are characterised for snd-aloop
+  compress-offload: snd-aloop has no compress offload device
+  ucm: snd-aloop has no UCM configuration
+  pipewire: no PipeWire daemon runs in the VM
+  video-decoder-H264: vicodec codes FWHT only
+  video-encoder-H264: vicodec codes FWHT only
+  gst-v4l2-decoder-FWHT: GStreamer has no v4l2 element for FWHT
+  gst-v4l2-encoder-FWHT: GStreamer has no v4l2 element for FWHT
+  tee: no TEE in the VM
+  remoteproc: no remote processors in the VM
+  thermal: no thermal zones in a QEMU virt machine
+  sleep-stats: no low power statistics in the VM
+
+# requirements that need no hardware, so they may pass in the bare VM
+hardware_free:
+  GVI-009: GStreamer element inventory, user space only
+
+# fails accepted on this board, each with the reason (tools/vm/expect.py)
+known_fail: {}
