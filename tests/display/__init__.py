@@ -557,7 +557,9 @@ def t_edid(env, connector='primary'):
     except OSError as e:
         return 'fail', 'cannot read %s: %s' % (path, e)
     if not raw:
-        raise Missing('%s reports no EDID' % k['name'], hw='edid')
+        if env.cfg('absent', 'edid'):
+            raise Missing('%s reports no EDID' % k['name'], hw='edid')
+        return 'fail', '%s is connected but reports no EDID' % k['name']
     if len(raw) < 128:
         return 'fail', '%s: EDID is %d bytes' % (k['name'], len(raw))
     blocks = edid_blocks(raw)

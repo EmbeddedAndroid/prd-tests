@@ -414,7 +414,9 @@ def t_case(env, case):
         return 'fail', '%s produced no results (rc %d): %s' % (case, rc, log.strip()[-200:])
     r = case_status(case, res)
     hw = cs[case].get('hw')
-    if hw and 'pass' not in res.values():
+    # only where the board says it lacks the hardware: a case that fails
+    # on hardware the board has stays a fail, in every product
+    if hw and 'pass' not in res.values() and env.cfg('absent', hw):
         raise Missing(r[1], hw=hw)
     return r
 
