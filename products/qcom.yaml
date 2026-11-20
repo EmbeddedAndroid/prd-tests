@@ -232,6 +232,17 @@ requirements:
     title: "Audio DSP firmware packaged"
     test: platform.firmware_packaged
     args: {paths: [/lib/firmware/qcom/*/*adsp*, /lib/firmware/qcom/*/*/*adsp*, /lib/firmware/qcom/*/*tplg*, /lib/firmware/qcom/*/*/*tplg*]}
+  QAU-039:
+    title: "TDM/PCM audio interface, end to end and through a stub codec"
+    tests:
+    - {test: audio.case, args: {case: interface-tdm}}
+    - {test: audio.case, args: {case: interface-tdm-stub}}
+  QAU-040:
+    title: "I2S audio interface, end to end and through a stub codec"
+    tests:
+    - {test: audio.case, args: {case: interface-i2s}}
+    - {test: audio.case, args: {case: interface-i2s-stub-playback}}
+    - {test: audio.case, args: {case: interface-i2s-stub-capture}}
   QVI-001:
     title: "Wi-Fi Display back channel (source)"
     test: platform.no_interface

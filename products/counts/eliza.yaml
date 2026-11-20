@@ -61,14 +61,12 @@ rows:
   GAU-018: 1
   GAU-021: 1
   GAU-022: 1
-  GAU-023: 1
   GAU-024: 2
   GAU-025: 1
   GAU-026: 1
   GAU-027: 1
   GAU-028: 1
   GAU-029: 1
-  GAU-030: 1
   GAU-031: 1
   GAU-032: 1
   GAU-033: 1
@@ -157,6 +155,8 @@ rows:
   QAU-036: 1
   QAU-037: 1
   QAU-038: 1
+  QAU-039: 1
+  QAU-040: 1
   QVI-001: 1
   QVI-002: 1
   QVI-003: 1
