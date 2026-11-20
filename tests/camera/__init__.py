@@ -7,7 +7,8 @@ capture through the media graph needs the links and formats of the
 board (board profile camera.raw: media-ctl setup lines, the video
 entity, pixel format and size); without it the raw test skips.
 
-Board profile keys: camera.raw {setup: [media-ctl arguments, where
+camera.v4l2_capture streams from any V4L2 capture node that is not
+part of a media pipeline (vivid, UVC). Board profile keys: camera.raw {setup: [media-ctl arguments, where
 {sensor} is the first sensor entity], video: entity name, pixelformat,
 width, height}, absent.camera-sensor."""
 import os
@@ -140,3 +141,27 @@ def t_libcamerasrc(env, seconds=5):
     return ('pass' if n > seconds else 'fail', 'libcamerasrc 1280x720: %d buffers in %d s%s' % (
         n, seconds, '' if n > seconds else '; %s' % out.strip()[-200:]),
         {'frames': n, 'fps': round(n / float(seconds), 1)})
+
+
+@test('camera.v4l2_capture')
+def t_v4l2_capture(env, count=30, width=640, height=480):
+    """V4L2 capture: a capture node outside a media pipeline streams frames"""
+    from prd import v4l2
+    cap = v4l2.CAP_VIDEO_CAPTURE | v4l2.CAP_VIDEO_CAPTURE_MPLANE
+    devs = [d for d in v4l2.devices() if not d.m2m and d.caps & cap and
+            not d.caps & v4l2.CAP_IO_MC and d.formats('capture')]
+    if not devs:
+        raise Missing('no V4L2 video capture node outside a media pipeline', hw='v4l2-capture')
+    d = devs[0]
+    fmts = [f for f, fl, _ in d.formats('capture')]
+    if not have('v4l2-ctl'):
+        return 'fail', 'v4l2-ctl not on the image'
+    rc, log = sh('timeout 30 v4l2-ctl -d %s --set-fmt-video=width=%d,height=%d --stream-mmap=4 '
+                 '--stream-count=%d --stream-to=/dev/null --verbose 2>&1' % (d.path, width, height,
+                                                                            count), timeout=40)
+    n = log.count('cap dqbuf')
+    fps = re.findall(r'fps: ([\d.]+)', log)
+    meas = {'frames': n, 'fps': float(fps[-1]) if fps else 0}
+    return ('pass' if rc == 0 and n >= count else 'fail', '%s (%s, %s): %d of %d frames %dx%d, formats %s%s' % (
+        d.path, d.card, d.driver, n, count, width, height, ' '.join(fmts[:8]),
+        '' if rc == 0 and n >= count else '; rc %d: %s' % (rc, log.strip()[-200:])), meas)
