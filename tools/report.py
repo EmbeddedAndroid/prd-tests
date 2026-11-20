@@ -21,7 +21,9 @@ import urllib.request
 import yaml
 
 TOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LINE = re.compile(r'PRD ([A-Z]+-\d+) (pass|partial|fail|skip): (.*?)(?: \[(.*)\])? \([\d.]+ s\)$')
+# the measurements are the last " [...]" (no brackets inside); reasons
+# may hold bracketed lists
+LINE = re.compile(r'PRD ([A-Z]+-\d+) (pass|partial|fail|skip): (.*?)(?: \[([^\[\]]*)\])? \([\d.]+ s\)$')
 START = re.compile(r'PRD [A-Z]+-\d+ (pass|partial|fail|skip): ')
 END = re.compile(r'\([\d.]+ s\)$')
 
