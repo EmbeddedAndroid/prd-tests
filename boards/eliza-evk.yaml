@@ -64,7 +64,16 @@ audio:
     ANALOG_CODEC: wcd
     I2C_DRIVERS: codec|wcd|wsa|tas|cs35|max98|rt5|aw88
   cases:
-    soundwire: {dir: soundwire-status, params: {MIN_MASTERS: 1, MIN_PERIPHERALS: 2}}
+    soundwire:
+      dir: soundwire-status
+      params:
+        MIN_MASTERS: 1
+        MIN_PERIPHERALS: 2
+        CARD: eliza-cqs-evk
+        # silent: the case counts bus transfers, it listens to nothing
+        STREAM_PCM: MultiMedia2
+        STREAM_XFER_PROBE: qcom_swrm_xfer_msg
+        STREAM_MIXER: WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia2=1;WSA RX0 MUX=AIF1_PB;WSA RX1 MUX=AIF1_PB;WSA_RX0 INP0=RX0;WSA_RX1 INP0=RX1;WSA_RX0 Digital Volume=0;WSA_RX1 Digital Volume=0;SpkrLeft DAC Switch=1;SpkrRight DAC Switch=1
     interface-tdm: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: tdm}, hw: audio-tdm}
     interface-i2s: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: i2s}, hw: audio-i2s}
     interface-analog-mic: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: analog-mic}, hw: audio-analog-mic}
