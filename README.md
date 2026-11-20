@@ -30,6 +30,9 @@ paths live in optional modules a board profile enables
 | `tools/fetch-vectors.sh` | downloads the public video conformance vectors for the overlay |
 | `tools/mk-lava-job.py` | writes the LAVA job for a board and a product (plus a stock restore job where the board needs one) |
 | `tools/selftest.py` | checks the result rules and that every product map entry names an existing test with valid arguments |
+| `tools/check-generic.py` | refuses board, SoC, card, codec, sensor, connector instance, GPIO and register names under `tests/` (CI) |
+| `tools/matrix.py` | test x platform matrix of a product run on several boards (LAVA jobs or results.jsonl) |
+| `tools/vm/` | the virtual board: run the suite on Linux virtual drivers in QEMU (`run.sh`), its host setup and the CI verdict (`expect.py`) |
 | `tools/scrub.sh` | refuses internal hosts, addresses and secrets; runs in CI on every push |
 | `diagnostics/<board>/` | board bring-up probes (GPIO and register level); not requirement tests |
 | `results/` | recorded results per product and board, with the LAVA jobs |
@@ -101,6 +104,46 @@ test job (needs `STOCK_IMAGE_URL`, `STOCK_IMAGE_DIR`,
 `python3 tools/selftest.py` checks the runner rules and the maps; run it
 after editing a test, a profile or a map.
 
+## Virtual board and CI
+
+`boards/virtual.yaml` describes a board made of Linux virtual drivers:
+vkms (KMS with overlay planes and writeback), vimc (a media controller
+camera pipeline), vicodec (an FWHT stateful codec), vivid (a V4L2
+capture device), snd-aloop (an ALSA loopback card), a software TPM
+(swtpm) and Weston on vkms with the Mesa software renderer.
+
+    sh tools/vm/setup-host.sh          # Ubuntu 24.04, arm64 or x86_64
+    sudo sh tools/vm/run.sh full       # results in vm-out/
+    python3 tools/vm/expect.py vm-out full
+    sudo sh tools/vm/run.sh bare       # same suite, no virtual drivers
+    python3 tools/vm/expect.py vm-out-bare bare
+
+With KVM, `run.sh` boots Ubuntu's generic kernel in QEMU (virtme-ng) on
+the host root file system; without KVM (arm64 cloud VMs and CI runners,
+which are QEMU/KVM guests themselves) it loads the same drivers into the
+host kernel, because an emulated guest is too slow. The verdict of a
+full run: every requirement passes, is partial, or skips with the
+board's reason, unless `boards/virtual.yaml` lists it under `known_fail`
+with the reason (features vkms and snd-aloop do not have). A bare run
+must not pass anything that needs the drivers, which shows the tests are
+not vacuous. `.github/workflows/virtual.yml` runs both on x86_64 and
+arm64 runners for every push; `scrub.yml` runs the scrub, the generic
+names gate and the selftest.
+
+## Generic product and matrix
+
+`products/generic.yaml` holds one requirement per test with arguments
+any board can answer, and sets `missing: skip`: there a missing
+interface is a skip ("interface absent"), since the question is which
+interfaces work. A product map that demands a feature (`products/
+eliza.yaml`) keeps the default, where a missing interface is a fail
+unless the board profile lists the hardware as absent. Run the generic
+product on several boards and tabulate it:
+
+    python3 tools/matrix.py --product products/generic.yaml EVK=<job> RB3=<job> VM=vm-out/results.jsonl
+
+The current matrix is in `results/matrix.md`.
+
 ## Adding a board
 
 Copy a profile in `boards/` and fill in what applies:
@@ -148,7 +191,8 @@ test's measurements when the requirement states one:
       args: {connector: primary, names: [max bpc], feature: Colour depth, commit: true}
       target: {max_bpc: 10}
 
-A target value is a minimum (`10`), a range (`{min: 5, max: 9}`), an
+`missing: skip` at the top makes a missing interface a skip instead of
+a fail (see above). A target value is a minimum (`10`), a range (`{min: 5, max: 9}`), an
 exact value (`{eq: 10}`) or a list the measured list must contain;
 `none` marks a requirement without a number. A requirement with
 several `tests` fails when any of them fails, passes when all pass,
