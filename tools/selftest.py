@@ -205,6 +205,25 @@ def check_units():
             got = vi.out_caps(caps, 'd')
             if got != want:
                 bad.append('out_caps: got %s, want %s' % (got, want))
+    if au is not None:
+        # a case naming its hardware: skip only where the board lists it absent
+        td, old_td = tempfile.mkdtemp(prefix='prd-selftest-td-'), au.TD
+        d = os.path.join(td, 'automated', 'linux', 'probe')
+        os.makedirs(d)
+        with open(os.path.join(d, 'probe.yaml'), 'w') as f:
+            f.write('run:\n  steps:\n  - cd automated/linux/probe; mkdir -p output; '
+                    'echo "probe-x $RES" > output/result.txt\n')
+        au.TD = td
+        try:
+            for res, absent, want in (('fail', {'hw-x': 'not fitted'}, 'skip'), ('fail', {}, 'fail'),
+                                      ('pass', {'hw-x': 'not fitted'}, 'pass')):
+                b = {'audio': {'cases': {'c': {'dir': 'probe', 'hw': 'hw-x', 'params': {'RES': res}}}},
+                     'absent': absent}
+                got = core.Runner(core.Env(b), td).call('audio.case', {'case': 'c'})[0]
+                if got != want:
+                    bad.append('case hw %s absent %s: got %s, want %s' % (res, absent, got, want))
+        finally:
+            au.TD = old_td
     r = core.Runner(core.Env({}), tempfile.mkdtemp(prefix='prd-selftest-'))
     st_, why, _ = r.call('fake.slow', {}, limit=1)
     if st_ != 'fail' or 'Timeout' not in why:
