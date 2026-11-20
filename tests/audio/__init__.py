@@ -17,8 +17,10 @@ mixer: 'ctl=value;...'}), mute / unmute (mixer strings), play2 (a second
 playback front end: pcm, mixer, off), volume_step (mixer string of a
 lower volume), loopback ({freq, min_db}: present when the speaker is
 heard by the microphones), dsp (remoteproc name of the audio DSP),
-cases ({name: {dir, params}}: the parameters of a shell test-definition
-case under tests/audio/test-definitions), case_env (environment for
+cases ({name: {dir, params, hw}}: the parameters of a shell test-definition
+case under tests/audio/test-definitions; hw names the hardware the case
+needs, so a case that passes nothing is missing hardware: skip where the
+profile lists hw as absent, fail otherwise), case_env (environment for
 every case)."""
 import math
 import os
@@ -394,7 +396,11 @@ def t_case(env, case):
     res = case_result(os.path.join(out, 'result.txt'))
     if not res:
         return 'fail', '%s produced no results (rc %d): %s' % (case, rc, log.strip()[-200:])
-    return case_status(case, res)
+    r = case_status(case, res)
+    hw = cs[case].get('hw')
+    if hw and 'pass' not in res.values():
+        raise Missing(r[1], hw=hw)
+    return r
 
 
 def case_status(case, res):
