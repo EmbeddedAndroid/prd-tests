@@ -9,7 +9,7 @@ rev=$(git -C "$here" rev-parse --short=8 HEAD 2>/dev/null || echo unknown)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir "$tmp/td"
-cp -a "$here/test-definitions/automated" "$tmp/td/"
+cp -a "$here/../tests/audio/test-definitions/automated" "$tmp/td/"
 echo "$rev eliza-prd-tests $(date -u +%FT%TZ)" > "$tmp/td/REV"
 tar -C "$tmp" -cf "$out" td
 echo "$out"

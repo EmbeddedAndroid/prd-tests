@@ -117,7 +117,7 @@ if os.environ.get('PRD_REPEAT_AFTER'):
     cases = cases[:i + 1] + [(d[0], '%s-after-%s' % (b, a), d[2])] + cases[i + 1:]
 if only:
     cases = [c for c in cases if c[1] in only]
-tdroot = os.path.join(here, 'test-definitions')
+tdroot = os.path.join(os.path.dirname(here), 'tests', 'audio', 'test-definitions')
 pre = ['cat /etc/qcdfp; uname -r; cat /td/REV',
        "lava-test-case linux-fingerprint --shell 'uname -r | grep -q %s'" % fp,
        "lava-test-case rootfs-fingerprint --shell 'grep -q %s /etc/qcdfp'" % fp,
