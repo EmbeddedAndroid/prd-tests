@@ -224,6 +224,70 @@ def check_units():
                     bad.append('case hw %s absent %s: got %s, want %s' % (res, absent, got, want))
         finally:
             au.TD = old_td
+    cx = sys.modules.get('tests.camx')
+    if cx is not None:
+        cams = {'cameras': [{'id': 0, 'width': 64, 'height': 48, 'fps': 30}]}
+        td = tempfile.mkdtemp(prefix='prd-selftest-camx-')
+        # without CamX every case fails (skip only where the board lists camx absent)
+        for b, args, want, word in (({}, {}, 'fail', 'modules.camx'),
+                                    ({'absent': {'camx': 'no CamX'}}, {}, 'skip', 'no CamX'),
+                                    ({'modules': {'camx': True}}, {}, 'fail', 'camx.cameras'),
+                                    ({'modules': {'camx': True}, 'camx': cams}, {'camera': 5}, 'fail',
+                                     'camera 5'),
+                                    ({'modules': {'camx': True}, 'camx': cams}, {}, 'fail', '')):
+            for t in ('camx.preview', 'camx.capture', 'camx.concurrent', 'camx.service'):
+                a = args if t in ('camx.preview', 'camx.capture') else {}
+                w = '' if (t == 'camx.service' and 'modules' in b) or (args and not a) else word
+                got, why, _ = core.Runner(core.Env(b), td).call(t, a)
+                if got != want or w not in why:
+                    bad.append('%s %s %s: got %s %s, want %s' % (t, b, a, got, why[:80], want))
+        if not cx.kmd_graphs():
+            got, why, _ = core.Runner(core.Env({'modules': {'camx': True}}), td).call('camx.kmd', {})
+            if got != 'fail' or cx.REQ_MGR_MODEL not in why:
+                bad.append('camx.kmd without the driver: got %s %s' % (got, why[:80]))
+        log = ('/GstPipeline:pipeline0/GstFakeSink:sink0: last-message = chain   ******* (sink0:sink) '
+               '(3110400 bytes, dts: none, pts: 0:00:01.000000000, duration: 0:00:00.033333333)\n')
+        log = ''.join(log.replace('01.000000000', '%012.9f' % (1 + i / 30.0)) for i in range(31)) + \
+            log.replace('sink0', 'sink1')
+        s = cx.parse_sinks(log)
+        if sorted(s) != [0, 1] or len(s[0]) != 31 or len(s[1]) != 1 or cx.pts_fps(s[0]) != 30.0 or \
+                cx.pts_fps(s[1]) != 0.0:
+            bad.append('camx parse_sinks: %s' % {k: len(v) for k, v in s.items()})
+        # the memory:GBM caps carry parentheses: one shell word each
+        import shlex
+        words = shlex.split(cx.pipeline([{'id': 0, 'width': 64, 'height': 48, 'fps': 30},
+                                         {'id': 1, 'width': 32, 'height': 24, 'fps': 15}]))
+        if 'video/x-raw(memory:GBM),format=NV12,width=32,height=24,framerate=15/1' not in words:
+            bad.append('camx pipeline quoting: %s' % words)
+        # 10 buffers in 5 s from a 30 fps camera is a starved stream, not a preview
+        # so is a stream that stops after a few frames at the right rate
+        slow, stall = [i / 2.0 for i in range(10)], [i / 30.0 for i in range(5)]
+        if cx.rate_ok({'fps': 30}, slow, 5) or cx.rate_ok({'fps': 30}, stall, 5) or \
+                not cx.rate_ok({'fps': 30}, [i / 30.0 for i in range(150)], 5):
+            bad.append('camx rate_ok: 2 fps %s, stall %s' % (cx.pts_fps(slow), cx.pts_fps(stall)))
+        # a service restart during a stream fails the stream
+        old_sh = cx.sh
+        cx.sh = lambda cmd, timeout=None: (0, '3\n') if 'NRestarts' in cmd else old_sh(cmd, timeout)
+        try:
+            got = cx.restarted(core.Env({}), 1, ('pass', 'ok', {}))
+            same = cx.restarted(core.Env({}), 3, ('pass', 'ok', {'frames': 1}))
+        finally:
+            cx.sh = old_sh
+        if got[0] != 'fail' or 'restarted 2 times' not in got[1] or same != ('pass', 'ok', {'frames': 1}):
+            bad.append('camx restarted: %s, unchanged count %s' % (got, same))
+        if cx.rate_ok({'fps': 0}, [], 5):
+            bad.append('camx rate_ok: empty stream with fps 0 passed')
+        flat, noisy = os.path.join(td, 'flat'), os.path.join(td, 'noisy')
+        open(flat, 'wb').write(b'\x80' * 6000)
+        open(noisy, 'wb').write(bytes((i * 37) % 251 for i in range(6000)))
+        if cx.luma_stats(flat, 6000)[1] != 0.0 or cx.luma_stats(noisy, 6000)[1] < 2.0:
+            bad.append('camx luma_stats: flat %s noisy %s' % (cx.luma_stats(flat, 6000),
+                                                              cx.luma_stats(noisy, 6000)))
+        # the request manager's video node has the sensor function value too
+        if cx.roles([('a', 0x10001, False), ('b', 0x10001, False), ('video0', 0x10001, True),
+                     ('c', 0x10008, False), ('d', 0x10013, False), ('e', 0x20001, False)]) != \
+                {'sensor': 2, 'csiphy': 1, 'tfe_mc': 1}:
+            bad.append('camx roles')
     r = core.Runner(core.Env({}), tempfile.mkdtemp(prefix='prd-selftest-'))
     r.missing = 'skip'
     st_, why, _ = r.call('fake.missing', {})

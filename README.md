@@ -15,14 +15,14 @@ TPM, thermal and driver model sysfs interfaces. Each test discovers what
 the device has (connectors by type, codecs by format, sensors by entity
 function, cards by PCM) and names nothing board specific. Vendor-only
 paths live in optional modules a board profile enables
-(`tests/audioreach`).
+(`tests/audioreach`, `tests/camx`).
 
 ## Layout
 
 | path | what |
 |---|---|
 | `prd/` | runner library: test registry, result rules, target evaluation (`core.py`); raw-ioctl KMS and V4L2 clients (`kms.py`, `v4l2.py`); python3 standard library only |
-| `tests/<interface>/` | the generic tests of one interface: `display`, `video`, `camera`, `audio` (with the shell `test-definitions` cases), `platform`; optional vendor module `audioreach` |
+| `tests/<interface>/` | the generic tests of one interface: `display`, `video`, `camera`, `audio` (with the shell `test-definitions` cases), `platform`; optional vendor modules `audioreach` and `camx` |
 | `boards/<board>.yaml` | board profiles: LAVA deploy data, display roles, audio routes and cases, camera graph setup, enabled modules, hardware the board does not have |
 | `products/<product>.yaml` | product maps: requirement ID to test, arguments and target |
 | `tools/run.py` | the runner (on the device) |
@@ -143,7 +143,8 @@ product on several boards and tabulate it:
     python3 tools/matrix.py --product products/generic.yaml EVK=<job> RB3=<job> VM=vm-out/results.jsonl
 
 The current matrix is in `results/matrix.md`.
-Totals of the current run (pass/partial/fail/skip of 72):
+Totals of the current run (pass/partial/fail/skip of 72, recorded before
+GCA-006..010, the CamX tests, were added):
 
 | platform | pass | partial | fail | skip |
 |---|---|---|---|---|
@@ -179,14 +180,18 @@ Copy a profile in `boards/` and fill in what applies:
   Missing: skip where `absent` lists the key (`audio-loopback`,
   `audio-routes`), fail otherwise.
 - `camera.raw`: media-ctl links and formats for a raw capture.
-- `modules`: optional vendor modules (`audioreach`).
+- `camx`: the camera service unit (`service`, default
+  `qti-cam-server`) and the `cameras` the CamX stack exposes (`id`,
+  `width`, `height`, `fps`, `format`), used by the `camx` module.
+- `modules`: optional vendor modules (`audioreach`, `camx`).
 - `run_last`: tests that leave the device changed for the rest of the
   run (a test name, optionally with `key=value` arguments, for example
   `audio.case case=compress`); requirements using them run after the
   others.
 - `absent`: hardware the board does not have, keyed as the tests name
   it (`DSI`, `DP-sink`, `HDMI-A-sink`, `backlight`, `touch`,
-  `displays-<n>`, `audio-analyzer`, `camera-sensor`, `tpm`, ...), each
+  `displays-<n>`, `audio-analyzer`, `camera-sensor`, `camx`, `camera-2`,
+  `tpm`, ...), each
   with what would enable the tests.
 
 Nothing else changes: the same product map runs on the new board.
