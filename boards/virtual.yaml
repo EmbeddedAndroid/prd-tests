@@ -49,6 +49,7 @@ absent:
   audio-mute: snd-aloop has no mute route
   audio-volume: snd-aloop has no volume control
   audio-routes: no shell audio cases are characterised for snd-aloop
+  camx: the VM has no CamX camera stack (a Qualcomm image with CamX and modules.camx enables these tests)
   compress-offload: snd-aloop has no compress offload device
   ucm: snd-aloop has no UCM configuration
   pipewire: no PipeWire daemon runs in the VM

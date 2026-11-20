@@ -231,6 +231,22 @@ requirements:
   GCA-005:
     title: "GStreamer libcamerasrc"
     test: camera.libcamerasrc
+  GCA-006:
+    title: "CamX camera driver"
+    test: camx.kmd
+  GCA-007:
+    title: "CamX camera service"
+    test: camx.service
+    target: {restarts: {max: 0}}
+  GCA-008:
+    title: "CamX preview"
+    test: camx.preview
+  GCA-009:
+    title: "CamX capture"
+    test: camx.capture
+  GCA-010:
+    title: "CamX concurrent cameras"
+    test: camx.concurrent
   GPL-001:
     title: "DRM drivers in tree"
     test: platform.in_tree
