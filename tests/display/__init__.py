@@ -118,6 +118,8 @@ class Display:
         """Close KMS and make sure the compositor runs; returns its state
         and, when it does not run, the end of its log."""
         self.release()
+        if not self.cmd and sh('systemctl cat %s >/dev/null 2>&1' % self.unit)[0]:
+            raise Missing('no %s unit on this image' % self.unit, hw='compositor')
         if self.state() != 'active':
             self.start()
         st = self.state()
@@ -1274,7 +1276,7 @@ def t_wayland_gl(env, seconds=5, renderer=None, version=None,
     else:
         return 'fail', 'compositor active but no Wayland socket at %s after 20 s' % sock
     if not have('eglinfo'):
-        return 'fail', 'eglinfo not on the image: the EGL renderer cannot be read'
+        raise Missing('eglinfo not on the image: the EGL renderer cannot be read', hw='eglinfo')
     rc, info = sh('%s eglinfo -B -p wayland 2>&1' % e, timeout=20)
     rend = next((l.split(':', 1)[1].strip() for l in info.splitlines()
                  if re.search(r'opengl es profile renderer|renderer string', l, re.I)), '')

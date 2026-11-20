@@ -108,7 +108,7 @@ def t_libcamera(env, count=30, width=1920, height=1080, pixelformat='BGR888'):
     """libcamera: cam lists the camera and captures frames at a size"""
     c = C(env)
     if not have('cam'):
-        return 'fail', 'libcamera cam tool not on the image'
+        raise Missing('libcamera cam tool not on the image', hw='libcamera')
     rc, out = sh('cam -l 2>&1', timeout=60)
     cams = re.findall(r'^\s*\d+: (.*)$', out, re.M)
     if not cams:
@@ -132,8 +132,8 @@ def t_libcamera(env, count=30, width=1920, height=1080, pixelformat='BGR888'):
 def t_libcamerasrc(env, seconds=5):
     """GStreamer libcamerasrc: frames flow from the camera through a pipeline"""
     C(env).need_sensor()
-    if sh('gst-inspect-1.0 --exists libcamerasrc')[0]:
-        return 'fail', 'GStreamer libcamerasrc element not on the image'
+    if not have('gst-inspect-1.0') or sh('gst-inspect-1.0 --exists libcamerasrc')[0]:
+        raise Missing('GStreamer libcamerasrc element not on the image', hw='libcamerasrc')
     rc, out = sh('LIBCAMERA_SOFTISP_MODE=${LIBCAMERA_SOFTISP_MODE:-cpu} timeout -s INT %d '
                  'gst-launch-1.0 -e -v libcamerasrc ! video/x-raw,width=1280,height=720 ! '
                  'fakesink silent=false 2>&1' % seconds, timeout=seconds + 20)
@@ -155,7 +155,7 @@ def t_v4l2_capture(env, count=30, width=640, height=480):
     d = devs[0]
     fmts = [f for f, fl, _ in d.formats('capture')]
     if not have('v4l2-ctl'):
-        return 'fail', 'v4l2-ctl not on the image'
+        raise Missing('v4l2-ctl not on the image', hw='v4l2-ctl')
     rc, log = sh('timeout 30 v4l2-ctl -d %s --set-fmt-video=width=%d,height=%d --stream-mmap=4 '
                  '--stream-count=%d --stream-to=/dev/null --verbose 2>&1' % (d.path, width, height,
                                                                             count), timeout=40)

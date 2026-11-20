@@ -17,7 +17,10 @@ and measurements is a dict of numbers or strings. It raises:
                               not have that hardware and the result is
                               skip with the profile's reason; otherwise
                               the feature is missing and the result is
-                              fail.
+                              fail, or skip in a product that sets
+                              "missing: skip" (one that asks which
+                              interfaces work, not which features a
+                              product needs).
 
 Any other exception is a fail with the exception text; so is a test
 that has no result after 900 s.
@@ -178,6 +181,9 @@ def fmt_meas(meas):
 class Runner:
     def __init__(self, env, outdir='output'):
         self.env = env
+        # products that ask whether each interface works, not whether the
+        # product's features are there, report a missing interface as skip
+        self.missing = 'fail'
         self.outdir = outdir
         os.makedirs(outdir, exist_ok=True)
         self.res = open(os.path.join(outdir, 'result.txt'), 'w')
@@ -198,6 +204,8 @@ class Runner:
             why = self.env.cfg('absent', e.hw) if e.hw else None
             if why:
                 return 'skip', '%s; board: %s' % (e, why), {}
+            if self.missing == 'skip':
+                return 'skip', 'interface absent: %s' % e, {}
             return 'fail', str(e), {}
         except Exception as e:  # a crash in a test is a fail, with the reason
             traceback.print_exc(file=sys.stdout)

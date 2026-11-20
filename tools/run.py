@@ -83,6 +83,7 @@ def main():
     if not a.product:
         ap.error('--product or --test is required')
     prod = core.load_data(a.product)
+    run.missing = prod.get('missing', 'fail')
     areas = set(a.area.split(',')) if a.area else None
     todo = []
     for rid, req in prod['requirements'].items():

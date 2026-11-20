@@ -265,7 +265,7 @@ def t_concurrent(env, codec='H264', sessions=2, width=1920, height=1080, count=6
 def t_gst_elements(env, names):
     """GStreamer elements a use case needs are installed"""
     if not have('gst-inspect-1.0'):
-        return 'fail', 'gst-inspect-1.0 not on the image'
+        raise Missing('gst-inspect-1.0 not on the image', hw='gstreamer')
     miss = [n for n in names if sh('gst-inspect-1.0 --exists %s' % n)[0]]
     got = [n for n in names if n not in miss]
     return ('pass' if not miss else 'partial' if got else 'fail',
@@ -324,7 +324,7 @@ def t_v4l2ctl_roundtrip(env, codec=None, width=640, height=480, count=10, max_di
     """Encode and decode through the V4L2 codecs with v4l2-ctl, compared frame by frame"""
     v = V(env)
     if not have('v4l2-ctl'):
-        return 'fail', 'v4l2-ctl not on the image'
+        raise Missing('v4l2-ctl not on the image', hw='v4l2-ctl')
     encs = [c for c in v.codecs if c['role'] == 'encoder']
     decs = [c for c in v.codecs if c['role'] == 'decoder']
     pairs = [(e, d, f) for e in encs for d in decs for f in e['coded'] if f in d['coded'] and

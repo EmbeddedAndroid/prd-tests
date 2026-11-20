@@ -225,6 +225,11 @@ def check_units():
         finally:
             au.TD = old_td
     r = core.Runner(core.Env({}), tempfile.mkdtemp(prefix='prd-selftest-'))
+    r.missing = 'skip'
+    st_, why, _ = r.call('fake.missing', {})
+    if st_ != 'skip' or not why.startswith('interface absent'):
+        bad.append('missing skip product: got %s %s' % (st_, why))
+    r.missing = 'fail'
     st_, why, _ = r.call('fake.slow', {}, limit=1)
     if st_ != 'fail' or 'Timeout' not in why:
         bad.append('timeout: got %s %s' % (st_, why))

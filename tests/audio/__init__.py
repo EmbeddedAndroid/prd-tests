@@ -725,7 +725,7 @@ def t_roundtrip(env):
     a = A(env)
     a.need_loop()
     if not have('alsabat'):
-        return 'fail', 'alsabat not on the image'
+        raise Missing('alsabat not on the image', hw='alsabat')
     rc, out = sh('alsabat -P hw:%d,%d -C hw:%d,%d -c 2 -r 48000 -f S16_LE --roundtriplatency 2>&1 '
                  '| tail -12' % (a.card, a.pdev, a.card, a.cdev), timeout=120)
     m = re.search(r'average latency:?\s*([\d.]+)\s*ms', out, re.I) or \

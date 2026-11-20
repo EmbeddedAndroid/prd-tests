@@ -1,9 +1,12 @@
 # Generic product: one requirement per generic test, so every test runs on
 # every board and the results form the test x platform matrix. The
 # board codec is the one the virtual board has (FWHT, vicodec); real
-# boards answer the H.264 rows. See README.md.
+# boards answer the H.264 rows. A missing interface is a skip here
+# ("missing: skip"): the matrix asks which interfaces work, not which
+# features a product needs. See README.md.
 product: generic
 title: Every generic test once
+missing: skip
 areas: {GDS: display, GAU: audio, GVI: video, GCA: camera, GPL: platform}
 requirements:
   GDS-001:
