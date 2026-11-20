@@ -1,0 +1,281 @@
+# SPDX-License-Identifier: GPL-2.0
+"""core.py: test registry, results and target evaluation (python3
+standard library only, so it runs on any image with python3).
+
+A test is a function registered with @test('<interface>.<name>'). It
+takes the run environment and the keyword arguments the product map
+gives it, discovers what the device has, and returns
+(status, reason[, measurements]) where status is pass, fail or partial
+and measurements is a dict of numbers or strings. It raises:
+
+  Skip(reason)                the device lacks the hardware or attached
+                              sink the test needs (an HDMI monitor, a
+                              camera sensor); the result is skip.
+  Missing(feature, hw=key)    the interface the test needs is not
+                              exposed at all. When the board profile
+                              lists key under 'absent', the board does
+                              not have that hardware and the result is
+                              skip with the profile's reason; otherwise
+                              the feature is missing and the result is
+                              fail.
+
+Any other exception is a fail with the exception text; so is a test
+that has no result after 900 s.
+
+The runner then applies the requirement's target to the measurements:
+a pass whose measurements miss the target, or do not measure it, is
+partial; so is a pass for a requirement whose target is "none" (the
+requirement states no number to meet). partial is reported to LAVA as "unknown" so it is never counted
+as a pass."""
+import importlib
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+import traceback
+
+LAVA = {'pass': 'pass', 'fail': 'fail', 'skip': 'skip', 'partial': 'unknown'}
+REGISTRY = {}
+
+
+class Skip(Exception):
+    pass
+
+
+class Timeout(Exception):
+    pass
+
+
+def _alarm(signum, frame):
+    raise Timeout('no result within the time limit')
+
+
+class Missing(Exception):
+    def __init__(self, feature, hw=None):
+        Exception.__init__(self, feature)
+        self.hw = hw
+
+
+def test(name):
+    def reg(fn):
+        REGISTRY[name] = fn
+        fn.test_name = name
+        return fn
+    return reg
+
+
+def sh(cmd, timeout=None):
+    """Run a shell command, return (rc, combined output); rc 124 on timeout."""
+    try:
+        p = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        return 124, (e.stdout or b'').decode('utf-8', 'replace')
+    return p.returncode, p.stdout.decode('utf-8', 'replace')
+
+
+def read(path, default=''):
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return default
+
+
+def have(tool):
+    return any(os.access(os.path.join(d, tool), os.X_OK)
+               for d in os.environ.get('PATH', '/usr/bin:/bin').split(':'))
+
+
+def load_data(path):
+    """Board profiles and product maps are YAML in the tree; the overlay
+    carries a JSON copy next to each so the board needs no YAML module."""
+    j = os.path.splitext(path)[0] + '.json'
+    if path.endswith('.json') or (os.path.exists(j) and not os.path.exists(path)):
+        with open(j) as f:
+            return json.load(f)
+    try:
+        import yaml
+    except ImportError:
+        with open(j) as f:
+            return json.load(f)
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
+class Env:
+    """What a test sees: the board profile and one cached discovery
+    object per interface (built on first use by the interface module's
+    discover(env))."""
+
+    def __init__(self, board):
+        self.board = board or {}
+        self._ctx = {}
+
+    def cfg(self, *path, default=None):
+        d = self.board
+        for k in path:
+            if not isinstance(d, dict) or k not in d:
+                return default
+            d = d[k]
+        return d
+
+    def module(self, name):
+        return bool(self.cfg('modules', name, default=False))
+
+    def ctx(self, iface):
+        if iface not in self._ctx:
+            mod = sys.modules['tests.%s' % iface]
+            try:
+                self._ctx[iface] = mod.discover(self)
+            except (Skip, Missing) as e:
+                self._ctx[iface] = e
+        c = self._ctx[iface]
+        if isinstance(c, (Skip, Missing)):
+            raise c
+        return c
+
+
+def check_target(meas, target):
+    """Return the list of target misses (empty when every target is met)."""
+    miss = []
+    for k, want in (target or {}).items():
+        if k not in meas or meas[k] is None:
+            miss.append('%s not measured' % k)
+            continue
+        got = meas[k]
+        if isinstance(want, dict):
+            if 'min' in want and not got >= want['min']:
+                miss.append('%s %s < %s' % (k, got, want['min']))
+            if 'max' in want and not got <= want['max']:
+                miss.append('%s %s > %s' % (k, got, want['max']))
+            if 'eq' in want and got != want['eq']:
+                miss.append('%s %s != %s' % (k, got, want['eq']))
+        elif isinstance(want, list):
+            have_ = got if isinstance(got, (list, tuple, set)) else str(got).split()
+            lack = [w for w in want if w not in have_]
+            if lack:
+                miss.append('%s lacks %s' % (k, ' '.join(map(str, lack))))
+        elif isinstance(want, bool) or isinstance(want, str):
+            if got != want:
+                miss.append('%s %s != %s' % (k, got, want))
+        elif not got >= want:
+            miss.append('%s %s < %s' % (k, got, want))
+    return miss
+
+
+def fmt_meas(meas):
+    out = []
+    for k, v in sorted(meas.items()):
+        if isinstance(v, (list, tuple, set)):
+            v = ','.join(map(str, v)) or '-'
+        out.append('%s=%s' % (k, v))
+    return ' '.join(out)
+
+
+class Runner:
+    def __init__(self, env, outdir='output'):
+        self.env = env
+        self.outdir = outdir
+        os.makedirs(outdir, exist_ok=True)
+        self.res = open(os.path.join(outdir, 'result.txt'), 'w')
+        self.js = open(os.path.join(outdir, 'results.jsonl'), 'w')
+        self.counts = {}
+
+    def call(self, name, args, limit=900):
+        fn = REGISTRY.get(name)
+        if fn is None:
+            return 'fail', 'no test named %s in this tree' % name, {}
+        old = signal.signal(signal.SIGALRM, _alarm)
+        signal.alarm(limit)
+        try:
+            r = fn(self.env, **(args or {}))
+        except Skip as e:
+            return 'skip', str(e), {}
+        except Missing as e:
+            why = self.env.cfg('absent', e.hw) if e.hw else None
+            if why:
+                return 'skip', '%s; board: %s' % (e, why), {}
+            return 'fail', str(e), {}
+        except Exception as e:  # a crash in a test is a fail, with the reason
+            traceback.print_exc(file=sys.stdout)
+            return 'fail', 'test raised %s: %s' % (type(e).__name__, e), {}
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old)
+        status, reason = r[0], r[1]
+        meas = dict(r[2]) if len(r) > 2 and r[2] else {}
+        if status not in ('pass', 'fail', 'partial'):
+            return 'fail', 'test returned bad status %r: %s' % (status, reason), meas
+        return status, reason, meas
+
+    def composite(self, parts):
+        """Several tests for one requirement: fail when any part fails,
+        pass when all pass, skip when all skip, partial otherwise."""
+        res = [self.call(p['test'], p.get('args')) for p in parts]
+        meas = {}
+        for r in res:
+            meas.update(r[2])
+        st = [r[0] for r in res]
+        reason = ' || '.join('%s %s: %s' % (p['test'], r[0], r[1]) for p, r in zip(parts, res))
+        if 'fail' in st:
+            return 'fail', reason, meas
+        if all(s == 'skip' for s in st):
+            return 'skip', reason, meas
+        if all(s == 'pass' for s in st):
+            return 'pass', reason, meas
+        return 'partial', reason, meas
+
+    def requirement(self, rid, req):
+        name = req.get('test') or '+'.join(p['test'] for p in req.get('tests', []))
+        t0 = time.time()
+        print('=== %s %s: %s' % (rid, req.get('title', ''), name), flush=True)
+        if req.get('tests'):
+            status, reason, meas = self.composite(req['tests'])
+        else:
+            status, reason, meas = self.call(name, req.get('args'))
+        target = req.get('target')
+        if status == 'pass' and target == 'none':
+            status = 'partial'
+            reason += '; measured, but the requirement states no target to meet'
+        elif status == 'pass' and target:
+            try:
+                miss = check_target(meas, target)
+            except Exception as e:  # a measurement that cannot be compared misses
+                miss = ['target %r not comparable: %s' % (target, e)]
+            if miss:
+                status = 'partial'
+                reason += '; target not met: ' + '; '.join(miss)
+        if req.get('note'):
+            reason += ' (%s)' % req['note']
+        self.counts[status] = self.counts.get(status, 0) + 1
+        dt = time.time() - t0
+        print('PRD %s %s: %s%s (%.1f s)' % (rid, status, reason,
+                                           ' [%s]' % fmt_meas(meas) if meas else '', dt), flush=True)
+        self.res.write('%s %s\n' % (rid, LAVA[status]))
+        self.res.flush()
+        self.js.write(json.dumps({'id': rid, 'test': name, 'status': status, 'reason': reason,
+                                  'meas': {k: (sorted(v) if isinstance(v, set) else v)
+                                           for k, v in meas.items()},
+                                  'seconds': round(dt, 1)}) + '\n')
+        self.js.flush()
+
+    def done(self):
+        self.res.close()
+        self.js.close()
+        print('PRD SUMMARY ' + ' '.join('%s=%d' % kv for kv in sorted(self.counts.items())),
+              flush=True)
+
+
+def import_tests(top, ifaces=None):
+    """Import tests/<iface>/__init__.py for every interface directory."""
+    if top not in sys.path:
+        sys.path.insert(0, top)
+    importlib.import_module('tests')
+    for d in sorted(os.listdir(os.path.join(top, 'tests'))):
+        if ifaces and d not in ifaces:
+            continue
+        if os.path.exists(os.path.join(top, 'tests', d, '__init__.py')):
+            importlib.import_module('tests.%s' % d)
