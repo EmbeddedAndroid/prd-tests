@@ -21,11 +21,27 @@ mode_vm=${PRD_VM:-}
 [ -n "$mode_vm" ] || { [ -w /dev/kvm ] && mode_vm=qemu || mode_vm=native; }
 tpm=$(mktemp -d)
 if [ "$mode_vm" = native ]; then
+	# a desktop session's media daemons hold the cameras and the sound
+	# card; seatd may have left its socket behind
+	for p in wireplumber pipewire pipewire-pulse; do pkill -x "$p" 2>/dev/null || true; done
+	rm -f /run/seatd.sock
+	if [ "$mode" = bare ]; then
+		for m in vkms vimc vicodec vivid snd_aloop; do
+			if [ -d "/sys/module/$m" ]; then
+				echo "run.sh: $m is still loaded, a bare run would not be bare" >&2
+				exit 1
+			fi
+		done
+	fi
 	modprobe tpm_vtpm_proxy
 	swtpm chardev --vtpm-proxy --tpm2 --tpmstate dir="$tpm" --pid file="$tpm/pid" --daemon > "$out/swtpm.log" 2>&1 || true
 	sh "$top/tools/vm/inside.sh" "$mode" "$product" "$out" > "$out/console.log" 2>&1 || true
 	if [ "$mode" = full ]; then
-		# leave the host as it was for the bare run
+		# leave the host as it was for the bare run; the framebuffer
+		# console holds vkms until it is unbound
+		for vt in /sys/class/vtconsole/vtcon*; do
+			grep -q "frame buffer" "$vt/name" 2>/dev/null && echo 0 > "$vt/bind" 2>/dev/null || true
+		done
 		for m in vkms vimc vicodec vivid snd_aloop; do modprobe -r "$m" 2>/dev/null || true; done
 	fi
 	tail -5 "$out/console.log"
