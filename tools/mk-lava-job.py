@@ -19,10 +19,11 @@ a second job restores the lab's stock image on the same device
 Environment: IMAGE_URL (qcomflash tarball), PRD_URL (tools/mk-overlay.sh
 tarball), ROOT_PW, optional IMAGE_DIR, ARTIFACT_HEADER and PRD_HEADER
 ("Name: value" HTTP header for the image and the overlay URL); backstop:
-STOCK_IMAGE_URL, STOCK_IMAGE_DIR, STOCK_UEFI_VERSION, optional
-STOCK_ARTIFACT_HEADER. Needs python3 with PyYAML."""
+STOCK_IMAGE_URL, STOCK_IMAGE_DIR, STOCK_UEFI_VERSION (a pattern, with
+backslash escapes for regex characters), optional STOCK_ARTIFACT_HEADER. Needs python3 with PyYAML."""
 import argparse
 import os
+import re
 import sys
 
 import yaml
@@ -169,7 +170,8 @@ def main():
                               'name': 'stock-restore', 'start': 'SBL1, End', 'end': 'UEFI Total',
                               'pattern': r'(?P<test_case_id>UEFI Ver)\s*:\s*(?P<result>%s)'
                               % env('STOCK_UEFI_VERSION'),
-                              'fixupdict': {env('STOCK_UEFI_VERSION'): 'pass'},
+                              # keyed by the text the board prints, not the pattern
+                              'fixupdict': {re.sub(r'\\(.)', r'\1', env('STOCK_UEFI_VERSION')): 'pass'},
                               'expected': ['uefi_ver']}]}}]}
         if header('STOCK_ARTIFACT_HEADER'):
             bs['actions'][0]['deploy']['qcomflash']['headers'] = header('STOCK_ARTIFACT_HEADER')
