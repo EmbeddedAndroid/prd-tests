@@ -20,7 +20,8 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommen
 	kmod udev busybox-static binutils >/dev/null
 k=$(ls /boot/vmlinuz-*-generic | sort -V | tail -1)
 k=${k#/boot/vmlinuz-}
+# and the extra modules of the running kernel, for the native mode
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-	"linux-modules-extra-$k" >/dev/null
+	"linux-modules-extra-$k" "linux-modules-extra-$(uname -r)" >/dev/null
 # virtme-ng reads the kernel image, which Ubuntu installs root-only
 sudo chmod a+r /boot/vmlinuz-* 2>/dev/null || true
