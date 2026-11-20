@@ -134,7 +134,7 @@ def t_libcamerasrc(env, seconds=5):
     C(env).need_sensor()
     if not have('gst-inspect-1.0') or sh('gst-inspect-1.0 --exists libcamerasrc')[0]:
         raise Missing('GStreamer libcamerasrc element not on the image', hw='libcamerasrc')
-    rc, out = sh('LIBCAMERA_SOFTISP_MODE=${LIBCAMERA_SOFTISP_MODE:-cpu} timeout -s INT %d '
+    rc, out = sh('LIBCAMERA_SOFTISP_MODE=${LIBCAMERA_SOFTISP_MODE:-cpu} timeout -k 5 -s INT %d '
                  'gst-launch-1.0 -e -v libcamerasrc ! video/x-raw,width=1280,height=720 ! '
                  'fakesink silent=false 2>&1' % seconds, timeout=seconds + 20)
     n = out.count('last-message = chain')
