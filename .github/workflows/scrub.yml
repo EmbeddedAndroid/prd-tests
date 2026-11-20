@@ -6,4 +6,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: tools/scrub.sh
+      - run: python3 tools/check-generic.py
       - run: python3 tools/selftest.py
