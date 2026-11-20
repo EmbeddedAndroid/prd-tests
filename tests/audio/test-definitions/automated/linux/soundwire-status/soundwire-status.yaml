@@ -2,7 +2,7 @@ metadata:
     format: Lava-Test Test Definition 1.0
     name: soundwire-status
     description: "SoundWire enumeration: every peripheral must be Attached and
-      bound to a driver; minimum bus and peripheral counts."
+      bound to a driver, no all-zero ID; minimum bus and peripheral counts."
     maintainer:
         - tyler.baker@oss.qualcomm.com
     os:

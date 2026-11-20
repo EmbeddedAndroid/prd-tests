@@ -5,8 +5,10 @@
 # SoundWire enumeration: every peripheral the kernel created on a SoundWire
 # bus must report "Attached" and be bound to a driver, and at least
 # MIN_MASTERS buses and MIN_PERIPHERALS peripherals must exist. A
-# peripheral that is described but never attached fails its case. Skipped
-# when the kernel has no SoundWire bus.
+# peripheral that is described but never attached fails its case, and so
+# does any peripheral with an all-zero ID (MIPI assigns no manufacturer ID
+# 0: the ID was read from no device). Skipped when the kernel has no
+# SoundWire bus.
 
 # shellcheck disable=SC1091
 . ../../lib/sh-test-lib
@@ -62,6 +64,18 @@ for d in "${D}"/sdw:*; do
         report_fail "soundwire-${name}-attached"
     fi
 done
+zero=""
+for d in "${D}"/sdw:*; do
+    [ -e "${d}" ] || continue
+    # sdw:<controller>:<link>:<manufacturer>:<part>:<class>:<unique>
+    [ "$(basename "${d}" | cut -d: -f4-5)" = "0000:0000" ] && zero="${zero} $(basename "${d}")"
+done
+if [ -n "${zero}" ]; then
+    info_msg "peripherals with an all-zero ID:${zero}"
+    report_fail "soundwire-ids"
+else
+    report_pass "soundwire-ids"
+fi
 add_metric "soundwire-buses" "$([ "${masters}" -ge "${MIN_MASTERS}" ] && echo pass || echo fail)" "${masters}" count
 add_metric "soundwire-peripherals" "$([ "${n}" -ge "${MIN_PERIPHERALS}" ] && echo pass || echo fail)" "${n}" count
 dmesg | grep -iE "soundwire|sdw" | tail -20
