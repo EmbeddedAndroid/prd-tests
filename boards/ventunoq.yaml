@@ -1,0 +1,34 @@
+# Arduino VENTUNO Q (Monaco) on the qcom-deb-images Debian trixie eMMC
+# image (stock firmware). The image asks for a new password at the first
+# login; the profile answers it the way the image's CI jobs do.
+name: ventunoq
+
+lava:
+  device_type: monaco-arduino-monza
+  image_dir: flash_monaco-arduino-monza_emmc
+  rootfs_image: disk-sdcard.img2
+  storage: emmc
+  firehose: prog_firehose_ddr.elf
+  rawprogram: [rawprogram0.xml]
+  patch: [patch0.xml]
+  username: debian
+  login_first: [debian, new password, new password, sudo su]
+  prompts: [debian@debian, Current password, New password, Retype new password]
+  prompt: 'root@debian'
+  firmware_fingerprint: false
+  backstop: false
+  priority: medium
+
+display:
+  compositor: weston
+
+modules:
+  audioreach: false
+
+absent:
+  primary-display: the primary display type of this board is not characterised in this profile
+  audio-routes: the speaker and microphone routes of this board are not characterised in this profile
+  audio-loopback: no speaker-to-microphone loopback is characterised for this board
+  camera-raw-graph: no media graph setup for a raw capture is characterised for this board
+  audio-analyzer: no calibrated audio measurement path on the lab boards
+

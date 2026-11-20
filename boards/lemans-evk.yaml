@@ -1,0 +1,32 @@
+# Qualcomm IQ-9075 EVK (Lemans) on the meta-qcom CI qcom-multimedia-image
+# for iq-9075-evk (stock firmware). Only what the tests cannot discover.
+name: lemans-evk
+
+lava:
+  device_type: lemans-evk
+  image_dir: qcom-multimedia-image-iq-9075-evk
+  # SAIL boot image on SPI NOR, then the application processor on UFS
+  flash:
+    - {path: sail_nor, storage: spinor, firehose: prog_firehose_ddr.elf, rawprogram: [rawprogram0.xml], patch: [patch0.xml]}
+    - storage: ufs
+      firehose: prog_firehose_ddr.elf
+      rawprogram: [rawprogram0.xml, rawprogram1.xml, rawprogram2.xml, rawprogram3.xml, rawprogram4.xml, rawprogram5.xml]
+      patch: [patch0.xml, patch1.xml, patch2.xml, patch3.xml, patch4.xml, patch5.xml]
+  prompt: 'root@lemans-evk'
+  firmware_fingerprint: false
+  backstop: false
+  priority: medium
+
+display:
+  compositor: weston
+
+modules:
+  audioreach: false
+
+absent:
+  primary-display: the primary display type of this board is not characterised in this profile
+  audio-routes: the speaker and microphone routes of this board are not characterised in this profile
+  audio-loopback: no speaker-to-microphone loopback is characterised for this board
+  camera-raw-graph: no media graph setup for a raw capture is characterised for this board
+  audio-analyzer: no calibrated audio measurement path on the lab boards
+
