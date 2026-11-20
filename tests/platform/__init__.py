@@ -80,6 +80,12 @@ def t_in_tree(env, cls):
                     mods[mn] = read('/sys/module/%s/taint' % mn).strip()
                 else:
                     builtin.add(dn)
+            elif os.path.isdir('/sys/module/%s' % os.path.basename(p).replace('-', '_')) and \
+                    os.path.dirname(p).endswith('/platform'):
+                # a platform device a module creates for itself, without a
+                # driver to bind (a virtual device): named after its module
+                mn = os.path.basename(p).replace('-', '_')
+                mods[mn] = read('/sys/module/%s/taint' % mn).strip()
             p = os.path.dirname(p)
     if not mods and not builtin:
         return 'fail', 'no driver is bound to the %d %s devices' % (len(devs), cls)
