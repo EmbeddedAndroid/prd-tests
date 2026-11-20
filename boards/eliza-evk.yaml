@@ -63,10 +63,10 @@ audio:
     I2C_DRIVERS: codec|wcd|wsa|tas|cs35|max98|rt5|aw88
   cases:
     soundwire: {dir: soundwire-status, params: {MIN_MASTERS: 1, MIN_PERIPHERALS: 2}}
-    interface-tdm: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: tdm}}
-    interface-i2s: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: i2s}}
-    interface-analog-mic: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: analog-mic}}
-    interface-i2c: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: i2c}}
+    interface-tdm: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: tdm}, hw: audio-tdm}
+    interface-i2s: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: i2s}, hw: audio-i2s}
+    interface-analog-mic: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: analog-mic}, hw: audio-analog-mic}
+    interface-i2c: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: i2c}, hw: audio-i2c}
     interface-dp: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: dp}}
     drivers:
       dir: audio-drivers
@@ -175,4 +175,8 @@ absent:
   displays-2: the EVK has one HDMI port and no DSI panel; a DSI panel or a DP sink enables this test
   displays-3: the EVK has one HDMI port and no DSI panel; a DSI panel and a DP sink enable this test
   audio-analyzer: the on-board speakers and DMICs are an acoustic loop, not a calibrated measurement path
+  audio-tdm: the EVK specification lists two SoundWire WSA8845 speaker amplifiers and DMICs as its audio hardware and no TDM/PCM port (a TDM codec on the LPASS audio interface pins with its DAI link enables this test)
+  audio-i2s: the EVK specification lists two SoundWire WSA8845 speaker amplifiers and DMICs as its audio hardware and no I2S port (an I2S codec on the LPASS audio interface pins with its DAI link enables this test)
+  audio-analog-mic: the EVK has no analog codec (WCD) and no analog microphone input; its microphones are DMICs on the VA macro (an analog codec board enables this test)
+  audio-i2c: the EVK has no I2C-controlled audio device; its amplifiers are controlled over SoundWire (an I2C codec or amplifier enables this test)
   camera-sensor: a camera module (the reference IMX577 on CAM0) is not fitted on every EVK
