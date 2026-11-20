@@ -1,97 +1,162 @@
-# Eliza PRD tests
+# prd-tests
 
-Every test written so far for an Eliza (Qualcomm Eliza SoC) product
-requirement, collected in one place for review, with the latest recorded
-result of each. The board is the Eliza CQS EVK (eMMC) running open boot
-firmware (TF-A, OP-TEE, U-Boot) and meta-qcom images; most tests run in
-LAVA on the `eliza-evk-emmc` device type at
-https://lava.infra.foundries.io, the rest on a board console.
+Product requirement tests on standard Linux interfaces. A product's
+requirements are mapped to generic tests; a board profile supplies the
+few facts a test cannot discover; one runner executes the map on a
+device and reports every requirement as pass, partial, fail or skip
+with the reason and the measurements.
 
-Every requirement the evaluation looked at is listed in its area's
-README, including the ones with no test (GAP, with the reason). Results
-are quoted as measured; nothing is rounded up.
+The tests use the kernel and user space interfaces any board exposes:
+DRM/KMS (atomic API, dumb buffers, writeback) and Wayland/EGL for
+display, V4L2 stateful codecs and GStreamer for video, the media
+controller, V4L2 capture and libcamera for camera, ALSA (PCMs, mixer,
+compress offload), UCM and PipeWire for audio, and the remoteproc, TEE,
+TPM, thermal and driver model sysfs interfaces. Each test discovers what
+the device has (connectors by type, codecs by format, sensors by entity
+function, cards by PCM) and names nothing board specific. Vendor-only
+paths live in optional modules a board profile enables
+(`tests/audioreach`).
 
 ## Layout
 
 | path | what |
 |---|---|
-| `audio/` | ASoC and AudioReach PAL test definitions, LAVA job generator, results |
-| `video/` | iris (V4L2) and GStreamer probes, overlay builder, LAVA job generator, results |
-| `camera/` | CAMSS raw capture and libcamera checks, results |
-| `display/` | HDMI KMS and GPIO checks, DisplayPort status job, Weston gate, results |
-| `common/lava/` | shared LAVA templates (open-boot deploy and login, stock restore backstop) and `jobtpl.py` |
-| `tools/scrub.sh` | refuses internal hosts, addresses and secrets; run in CI on every push |
+| `prd/` | runner library: test registry, result rules, target evaluation (`core.py`); raw-ioctl KMS and V4L2 clients (`kms.py`, `v4l2.py`); python3 standard library only |
+| `tests/<interface>/` | the generic tests of one interface: `display`, `video`, `camera`, `audio` (with the shell `test-definitions` cases), `platform`; optional vendor module `audioreach` |
+| `boards/<board>.yaml` | board profiles: LAVA deploy data, display roles, audio routes and cases, camera graph setup, enabled modules, hardware the board does not have |
+| `products/<product>.yaml` | product maps: requirement ID to test, arguments and target |
+| `tools/run.py` | the runner (on the device) |
+| `tools/mk-overlay.sh` | tars runner, tests, profiles and maps for a LAVA overlay at `/prd` |
+| `tools/fetch-vectors.sh` | downloads the public video conformance vectors for the overlay |
+| `tools/mk-lava-job.py` | writes the LAVA job for a board and a product (plus a stock restore job where the board needs one) |
+| `tools/selftest.py` | checks the result rules and that every product map entry names an existing test with valid arguments |
+| `tools/scrub.sh` | refuses internal hosts, addresses and secrets; runs in CI on every push |
+| `diagnostics/<board>/` | board bring-up probes (GPIO and register level); not requirement tests |
+| `results/` | recorded results per product and board, with the LAVA jobs |
 
-## Images the results were measured on
+## Results
 
-Every image embeds a build fingerprint (FP) that is incremented on every
-build and read back before a result counts: on BL2, BL31, OP-TEE and
-U-Boot in the cold boot log, in the kernel release (`uname -r`) and in
-/etc/qcdfp (or the DT /lab-fingerprint on diagnostic images).
+Every requirement gets exactly one of:
 
-| area | image | FP |
-|---|---|---|
-| audio, ASoC path | meta-qcom qcom-multimedia-image, eliza-evk-emmc-open-fw | QCDFP-261119-1770 |
-| audio, PAL path | meta-qcom qcom-multimedia-proprietary-image, eliza-evk-emmc-open-fw | QCDFP-261119-1771 |
-| audio, regression on an integration image | qcom-multimedia-image | QCDFP-261119-1783 |
-| video | qcom-multimedia-image | QCDFP-261119-1770 |
-| camera | diagnostic kernel image (camera DT and modules on the QCDFP-261114-1527 kernel and rootfs); later the integration image | ECAMDIAG-261120-05, ECAMDIAG-261120-09; QCDFP-261120-1792 |
-| display, HDMI | HDMI test kernel | EHDFP-261120-0005 (EDID on EHDFP-261120-0003) |
-| display, Weston | integration image (drm/msm, Mesa freedreno) | QCDFP-261120-1792 |
-| display, DisplayPort | qcom-multimedia-image | QCDFP-261114-1511 |
+- pass: measured and meets what the test checks, and the target if the
+  map gives one;
+- partial: works, but the target is not met or not measured, or the
+  requirement states no number (`target: none`), or only part of the
+  feature could be exercised; reported to LAVA as `unknown`, never as
+  a pass;
+- fail: the test ran and the feature is missing or broken, including
+  features no standard interface exposes (`platform.no_interface` names
+  what is missing);
+- skip: the board lacks hardware the test needs (a sink, a panel, an
+  analyzer), or the board profile states that something the test needs
+  is not characterised for that board (audio routes); the reason says
+  what would enable it.
 
-## How to run
+A test that finds an interface missing raises `Missing(feature, hw=key)`.
+That is a fail, unless the board profile lists `key` under `absent`, in
+which case the board does not have that hardware and the result is skip
+with the profile's reason. So the same test fails on a board that should
+have a DSI panel and skips on a board known to have none.
 
-LAVA tests: each area has a generator that writes a job from
-`common/lava/open-boot.yaml` plus its test actions, and a stock restore
-job from `common/lava/backstop.yaml` to submit right after it. The
-generators need python3 and PyYAML. Templates carry `{PLACEHOLDER}`s; a
-generator fills each one from the environment variable of the same name
-when it is set and leaves the rest for you to fill in:
+The runner prints one line per requirement:
 
-| placeholder / variable | meaning |
-|---|---|
-| `{IMAGE_URL}` | URL of the qcomflash tarball of the image under test, reachable by the LAVA dispatcher |
-| `{IMAGE_DIR}` | top directory inside that tarball (default `qcom-multimedia-image-eliza-evk-emmc-open-fw`, or the proprietary image's) |
-| `{FP}` | build fingerprint of that image (generator argument) |
-| `{DEVICE}` | LAVA device name of an `eliza-evk-emmc` board (generator argument) |
-| `{ROOT_PW}` | root login password of the image |
-| `{TD_URL}` | URL of the audio test-definitions tarball (`audio/scripts/mk-td-tar.sh`) |
-| `{OVERLAY_URL}` | URL of the video probe overlay (`video/scripts/stage-overlay.sh`) |
-| `{STOCK_IMAGE_URL}`, `{STOCK_IMAGE_DIR}` | the lab's stock health-check qcomflash tarball and its top directory, for the backstop |
-| `{STOCK_UEFI_VERSION}` | UEFI version string the stock image prints, matched by the backstop |
-| `ARTIFACT_HEADER` | optional `Name: value` HTTP header added to every deploy URL of the image under test (for artifact stores that need one) |
-| `STOCK_ARTIFACT_HEADER` | optional `Name: value` HTTP header for the stock image URL in the backstop |
-| `ACDB_URL`, `ACDB_MD5` | optional, audio PAL only: tar with the board ACDB (not in this repository) and its md5 |
+    PRD DSP-023 pass: captured 320x240 quadrants ... [formats=XR24,AR24]
 
-Console tests (camera, HDMI, Weston): the commands are in the area
-README; they need a board with the hardware fitted (IMX577 camera module,
-HDMI monitor).
+and writes `<outdir>/result.txt` (the format `send-to-lava.sh` reads,
+one LAVA test case per requirement) and `<outdir>/results.jsonl` (status,
+reason and measurements per requirement).
 
-## Summary
+## Running
 
-pass = measured and meets what the test checks; partial = measured in
-part, or measured without a target to meet; fail = the test ran and the
-feature is absent; not run = a test exists but did not run or could not
-exercise the feature (for example no DP sink fitted); GAP = no test.
+On a device with python3 (no other module needed when the overlay's
+JSON copies of the YAML files are used):
 
-| area | requirements | pass | partial | fail | not run | GAP |
-|---|---|---|---|---|---|---|
-| audio | 71 (+13 deprecated, not evaluated) | 5 | 16 | 5 | 0 | 45 |
-| video | 41 | 0 | 21 | 2 | 0 | 18 |
-| camera | 2 | 1 | 1 | 0 | 0 | 0 |
-| display | 89 | 3 | 3 | 0 | 10 | 73 |
+    python3 tools/run.py --board boards/eliza-evk.yaml --product products/eliza.yaml -o out
+    python3 tools/run.py --board ... --product ... --area display          # one area
+    python3 tools/run.py --board ... --product ... DSP-023 DSP-026          # some IDs
+    python3 tools/run.py --list                                             # every test
+    python3 tools/run.py --board boards/eliza-evk.yaml --test display.edid connector=HDMI-A
 
-Audio counts one status per requirement over both software paths: pass
-needs every tested path to pass; one path passing with the other not run
-counts as partial.
+KMS tests need DRM master: the runner stops the compositor unit named in
+the profile (default `weston`) for them and starts it again for the
+Wayland tests and at exit.
 
-Not here: the platform regression suites run on the same images (kernel
-health, firmware fingerprints, remoteproc, OP-TEE xtest, KVM, GPU,
-inference) are not mapped to requirement ids by any evaluation.
+In LAVA (host side, python3 with PyYAML):
+
+    sh tools/fetch-vectors.sh vectors           # optional: video conformance vectors
+    sh tools/mk-overlay.sh prd.tar vectors      # upload prd.tar where the dispatcher can fetch it
+    export IMAGE_URL=... PRD_URL=... ROOT_PW=...   # optional ARTIFACT_HEADER, PRD_HEADER
+    python3 tools/mk-lava-job.py --board boards/eliza-evk.yaml --product products/eliza.yaml \
+        --tag run1 --device <lava device> --fp <build fingerprint> -o jobs
+
+The job flashes the image with qdl, checks the build fingerprint where
+the profile says the image embeds one (firmware banners, kernel release,
+rootfs file), unpacks the overlay at `/prd`, runs the product map and
+reports each requirement as a LAVA test case. For boards whose test
+image replaces the lab's stock firmware (`lava.backstop`), a second job
+restores the stock image on the same device: submit it right after the
+test job (needs `STOCK_IMAGE_URL`, `STOCK_IMAGE_DIR`,
+`STOCK_UEFI_VERSION`, optional `STOCK_ARTIFACT_HEADER`).
+
+`python3 tools/selftest.py` checks the runner rules and the maps; run it
+after editing a test, a profile or a map.
+
+## Adding a board
+
+Copy a profile in `boards/` and fill in what applies:
+
+- `lava`: device type, image directory in the qcomflash tarball,
+  storage, firehose programmer, rawprogram and patch files, shell
+  prompt; `firmware_fingerprint` and `rootfs_fingerprint` if the image
+  embeds a build fingerprint; `backstop` if a stock restore is needed;
+  `login_commands` run after login; `timeout_skip` to go on to the next
+  action when one times out; `priority` (default low; medium where the
+  boards are shared with jobs at medium).
+- `display`: the connector type of the `primary` display and the
+  `external` ones (`HDMI-A`, `DP`, `DSI`, `eDP`), the compositor unit
+  and its Wayland socket (found under /run/user otherwise).
+- `audio`: card, playback and capture PCMs with their mixer routes,
+  mute/unmute, a second playback front end, a lower volume setting,
+  `loopback` when the speaker is heard by the microphones, the audio
+  DSP's remoteproc name, and the parameters of each shell `cases` entry
+  a product uses. Without them the acoustic tests and cases report
+  Missing: skip where `absent` lists the key (`audio-loopback`,
+  `audio-routes`), fail otherwise.
+- `camera.raw`: media-ctl links and formats for a raw capture.
+- `modules`: optional vendor modules (`audioreach`).
+- `run_last`: tests that leave the device changed for the rest of the
+  run (a test name, optionally with `key=value` arguments, for example
+  `audio.case case=compress`); requirements using them run after the
+  others.
+- `absent`: hardware the board does not have, keyed as the tests name
+  it (`DSI`, `DP-sink`, `HDMI-A-sink`, `backlight`, `touch`,
+  `displays-<n>`, `audio-analyzer`, `camera-sensor`, `tpm`, ...), each
+  with what would enable the tests.
+
+Nothing else changes: the same product map runs on the new board.
+
+## Adding a product
+
+Write `products/<product>.yaml`: neutral requirement IDs (no internal
+tracker IDs), each with a `title`, a `test` and its `args` (or `tests`,
+a list, when one requirement needs several), and a `target` on the
+test's measurements when the requirement states one:
+
+    DSP-003:
+      title: "Color Depth"
+      test: display.connector_property
+      args: {connector: primary, names: [max bpc], feature: Colour depth, commit: true}
+      target: {max_bpc: 10}
+
+A target value is a minimum (`10`), a range (`{min: 5, max: 9}`), an
+exact value (`{eq: 10}`) or a list the measured list must contain;
+`none` marks a requirement without a number. A requirement with
+several `tests` fails when any of them fails, passes when all pass,
+skips when all skip, and is partial otherwise. `areas` maps ID prefixes to
+the `--area` names. Run `tools/selftest.py` to check the map.
 
 ## Licensing
 
-`audio/test-definitions/` is a subset of the Linaro test-definitions
-tree and stays under its GPL-2.0 licence (`audio/test-definitions/COPYING`).
-`display/hdmi/pwnpat.c` is GPL-2.0 (SPDX header).
+GPL-2.0 (SPDX headers). `tests/audio/test-definitions/` is a subset of
+the Linaro test-definitions tree and stays under its GPL-2.0 licence
+(`tests/audio/test-definitions/COPYING`).
