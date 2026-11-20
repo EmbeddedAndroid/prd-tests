@@ -2,7 +2,8 @@ metadata:
     format: Lava-Test Test Definition 1.0
     name: soundwire-status
     description: "SoundWire enumeration: every peripheral must be Attached and
-      bound to a driver, no all-zero ID; minimum bus and peripheral counts."
+      bound to a driver, no all-zero ID; minimum bus and peripheral counts;
+      optionally, a stream addresses attached peripherals only."
     maintainer:
         - tyler.baker@oss.qualcomm.com
     os:
@@ -15,9 +16,14 @@ params:
     MIN_MASTERS: "1"
     MIN_PERIPHERALS: "2"
     WAIT_SECONDS: "60"
+    CARD: ""
+    STREAM_PCM: ""
+    STREAM_MIXER: ""
+    STREAM_COUNT: "10"
+    STREAM_XFER_PROBE: ""
 
 run:
     steps:
         - cd ./automated/linux/soundwire-status/
-        - ./soundwire-status.sh -m "${MIN_MASTERS}" -p "${MIN_PERIPHERALS}" -W "${WAIT_SECONDS}"
+        - ./soundwire-status.sh -m "${MIN_MASTERS}" -p "${MIN_PERIPHERALS}" -W "${WAIT_SECONDS}" -c "${CARD}" -s "${STREAM_PCM}" -x "${STREAM_MIXER}" -n "${STREAM_COUNT}" -X "${STREAM_XFER_PROBE}"
         - ../../utils/send-to-lava.sh ./output/result.txt
