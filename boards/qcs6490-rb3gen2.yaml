@@ -1,0 +1,44 @@
+# Qualcomm RB3 Gen 2 (QCS6490) on the meta-qcom qcom-multimedia-image as
+# built by the meta-qcom CI for rb3gen2-core-kit (stock firmware).
+# Nothing here is characterised beyond what the tests discover: no audio
+# routes, so the acoustic and shell audio cases skip with that reason.
+name: qcs6490-rb3gen2
+
+lava:
+  device_type: qcs6490-rb3gen2
+  image_dir: qcom-multimedia-image-rb3gen2-core-kit
+  storage: ufs
+  firehose: prog_firehose_ddr.elf
+  rawprogram: [rawprogram0.xml, rawprogram1.xml, rawprogram2.xml, rawprogram3.xml, rawprogram4.xml, rawprogram5.xml]
+  patch: [patch0.xml, patch1.xml, patch2.xml, patch3.xml, patch4.xml, patch5.xml]
+  prompt: 'root@rb3gen2'
+  firmware_fingerprint: false
+  backstop: false
+  # shared with the meta-qcom CI jobs, which run at medium
+  priority: medium
+
+display:
+  primary: HDMI-A
+  compositor: weston
+
+audio:
+  dsp: adsp
+
+modules:
+  audioreach: false
+
+platform:
+  sleep_stats: /sys/kernel/debug/qcom_stats
+
+absent:
+  DSI: no DSI panel is fitted on the lab boards
+  DP-sink: no DisplayPort sink on the USB-C port of the lab boards
+  HDMI-A-sink: no monitor or EDID dummy plug is known to be on the lab boards' HDMI output
+  backlight: no panel backlight on the lab boards
+  touch: no touch controller on the lab boards
+  displays-2: one display output in use on the lab boards
+  displays-3: one display output in use on the lab boards
+  audio-analyzer: no calibrated audio measurement path on the lab boards
+  audio-routes: the speaker and microphone routes of this board are not characterised in this profile
+  audio-loopback: no speaker-to-microphone loopback is characterised for this board
+  camera-raw-graph: no media graph setup for a raw capture is characterised for this board

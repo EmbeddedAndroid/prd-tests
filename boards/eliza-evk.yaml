@@ -1,0 +1,169 @@
+# Eliza CQS EVK (eMMC) on meta-qcom eliza-evk-emmc-open-fw images (open
+# TF-A, OP-TEE, U-Boot), upstream ASoC audio path.
+name: eliza-evk
+
+lava:
+  device_type: eliza-evk-emmc
+  image_dir: qcom-multimedia-image-eliza-evk-emmc-open-fw
+  storage: emmc
+  firehose: xbl_s_devprg_ns.melf
+  rawprogram: [rawprogram0.xml, rawprogram1.xml]
+  patch: [patch0.xml, patch1.xml]
+  prompt: 'root@eliza-evk-emmc-open-fw:[/~]#'
+  # open firmware prints the build fingerprint on BL2, BL31, OP-TEE and
+  # U-Boot; the kernel release and /etc/qcdfp carry it too
+  firmware_fingerprint: true
+  rootfs_fingerprint: /etc/qcdfp
+  # the test image replaces the lab's stock firmware: restore it after
+  backstop: true
+  timeout_skip: true
+  login_commands:
+    - mkdir -p /lava-ovl; mountpoint -q /lava-ovl || mount --bind / /lava-ovl
+
+display:
+  primary: HDMI-A
+  external: [DP]
+  compositor: weston
+  wayland: {runtime_dir: /run/user/1000, display: wayland-1}
+
+audio:
+  card: eliza-cqs-evk
+  dsp: adsp
+  play:
+    pcm: MultiMedia2
+    mixer: &spk WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1=0;WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia5=0;WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia2=1;WSA RX0 MUX=AIF1_PB;WSA RX1 MUX=AIF1_PB;WSA_RX0 INP0=RX0;WSA_RX1 INP0=RX1;WSA_RX0 Digital Volume=81;WSA_RX1 Digital Volume=81;WSA_COMP1 Switch=0;WSA_COMP2 Switch=0;SpkrLeft PA Volume=12;SpkrRight PA Volume=12;SpkrLeft COMP Switch=1;SpkrLeft BOOST Switch=1;SpkrLeft DAC Switch=1;SpkrLeft PBR Switch=1;SpkrLeft VISENSE Switch=0;SpkrLeft WSA MODE=0;SpkrRight COMP Switch=1;SpkrRight BOOST Switch=1;SpkrRight DAC Switch=1;SpkrRight PBR Switch=1;SpkrRight VISENSE Switch=0;SpkrRight WSA MODE=0
+  capture:
+    pcm: MultiMedia4
+    mixer: &mic01 VA DEC0 MUX=VA_DMIC;VA DMIC MUX0=DMIC0;VA_AIF1_CAP Mixer DEC0=1;VA_DEC0 Volume=100;VA DEC1 MUX=VA_DMIC;VA DMIC MUX1=DMIC1;VA_AIF1_CAP Mixer DEC1=1;VA_DEC1 Volume=100;MultiMedia4 Mixer VA_CODEC_DMA_TX_0=1
+  mute: &mute WSA_RX0 Digital Volume=0;WSA_RX1 Digital Volume=0
+  unmute: WSA_RX0 Digital Volume=81;WSA_RX1 Digital Volume=81
+  volume_step: WSA_RX0 Digital Volume=41;WSA_RX1 Digital Volume=41
+  play2:
+    pcm: MultiMedia1
+    mixer: WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1=1
+    off: WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1=0
+  # the on-board speakers are heard by the on-board DMICs; the rack has a
+  # 1040 Hz interferer, so test tones sit between its harmonics
+  loopback: {freq: 1600, min_db: 15}
+  # environment of every shell case: tone peaks searched within 10 %
+  case_env: {AUDIO_PEAK_SPAN: 1.1}
+  # parameters shared by the shell cases on the speaker/DMIC routes
+  case_common: &common
+    CARD: eliza-cqs-evk
+    PLAY_PCM: MultiMedia2
+    CAPTURE_PCM: MultiMedia4
+    PLAY_MIXER: *spk
+    CAPTURE_MIXER: *mic01
+    TONE_DBFS: -6
+    FREQ: 1600
+  cases:
+    soundwire: {dir: soundwire-status, params: {MIN_MASTERS: 1, MIN_PERIPHERALS: 2}}
+    interface-tdm: {dir: audio-interfaces, params: {CARD: eliza-cqs-evk, INTERFACES: tdm}}
+    interface-i2s: {dir: audio-interfaces, params: {CARD: eliza-cqs-evk, INTERFACES: i2s}}
+    interface-analog-mic: {dir: audio-interfaces, params: {CARD: eliza-cqs-evk, INTERFACES: analog-mic}}
+    interface-i2c: {dir: audio-interfaces, params: {CARD: eliza-cqs-evk, INTERFACES: i2c}}
+    interface-dp: {dir: audio-interfaces, params: {CARD: eliza-cqs-evk, INTERFACES: dp}}
+    drivers:
+      dir: audio-drivers
+      params: {CARD: eliza-cqs-evk, CARD_DRIVER: snd-sc8280xp, REMOTEPROC: adsp}
+    loopback:
+      dir: alsa-loopback
+      params:
+        <<: *common
+        MUTE_MIXER: *mute
+        SPEAKERS: right:2
+        SWEEP: 1600 2600 3640
+    capture-dmic23:
+      dir: alsa-capture
+      params:
+        <<: *common
+        CAPTURE_MIXER: VA DEC0 MUX=VA_DMIC;VA DMIC MUX0=DMIC2;VA_AIF1_CAP Mixer DEC0=1;VA_DEC0 Volume=100;VA DEC1 MUX=VA_DMIC;VA DMIC MUX1=DMIC3;VA_AIF1_CAP Mixer DEC1=1;VA_DEC1 Volume=100;MultiMedia4 Mixer VA_CODEC_DMA_TX_0=1
+        MICS: dmic2 dmic3
+        REMOTEPROC: ''
+    capture-dmic67:
+      dir: alsa-capture
+      params:
+        <<: *common
+        CAPTURE_MIXER: VA DEC0 MUX=VA_DMIC;VA DMIC MUX0=DMIC6;VA_AIF1_CAP Mixer DEC0=1;VA_DEC0 Volume=100;VA DEC1 MUX=VA_DMIC;VA DMIC MUX1=DMIC7;VA_AIF1_CAP Mixer DEC1=1;VA_DEC1 Volume=100;MultiMedia4 Mixer VA_CODEC_DMA_TX_0=1
+        MICS: dmic6 dmic7
+        REMOTEPROC: ''
+    volume:
+      dir: alsa-volume
+      params:
+        <<: *common
+        VOLUME_CTLS: WSA_RX0 Digital Volume;WSA_RX1 Digital Volume
+        VOLUMES: 81 80 71 61
+        MUTE_VALUE: 0
+        STEP_DB: 1
+        TOL_DB: 1
+        MIN_DB: 10
+    device-switch:
+      dir: alsa-device-switch
+      params:
+        CARD: eliza-cqs-evk
+        PLAY_PCM: MultiMedia2
+        CAPTURE_PCM: MultiMedia4
+        PLAY_MIXER: *spk
+        ROUTE_A: *mic01
+        ROUTE_OFF: VA DMIC MUX0=DMIC4;VA DMIC MUX1=DMIC5
+        ROUTE_B: VA DMIC MUX0=DMIC2;VA DMIC MUX1=DMIC3
+        FREQ: 1600
+        TONE_DBFS: -6
+    upmix: {dir: alsa-upmix, params: {<<: *common, CONTROL_CHANNEL: 1}}
+    latency: {dir: alsa-latency, params: {<<: *common, MUTE_MIXER: *mute, PERIOD_FRAMES: 240, BUFFER_PERIODS: 2}}
+    formats:
+      dir: alsa-formats
+      params: {<<: *common, PLAY_PCM2: MultiMedia1, PLAY_MIXER2: WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1=1}
+    compress:
+      dir: alsa-compress
+      params:
+        CARD: eliza-cqs-evk
+        COMPR_DEVICE: 4
+        CAPTURE_PCM: MultiMedia4
+        PLAY_MIXER: WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1=0;WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia5=0;WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia2=1;WSA RX0 MUX=AIF1_PB;WSA RX1 MUX=AIF1_PB;WSA_RX0 INP0=RX0;WSA_RX1 INP0=RX1;WSA_RX0 Digital Volume=81;WSA_RX1 Digital Volume=81;WSA_COMP1 Switch=0;WSA_COMP2 Switch=0;SpkrLeft PA Volume=12;SpkrRight PA Volume=12;SpkrLeft COMP Switch=1;SpkrLeft BOOST Switch=1;SpkrLeft DAC Switch=1;SpkrLeft PBR Switch=1;SpkrLeft VISENSE Switch=0;SpkrLeft WSA MODE=0;SpkrRight COMP Switch=1;SpkrRight BOOST Switch=1;SpkrRight DAC Switch=1;SpkrRight PBR Switch=1;SpkrRight VISENSE Switch=0;SpkrRight WSA MODE=0;WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia5=1
+        CAPTURE_MIXER: *mic01
+        MUTE_MIXER: *mute
+        TONE_DBFS: -6
+        FREQ: 1600
+    fastrpc: {dir: fastrpc, params: {TESTS: 'adsp:adsp:0:0 adsp-unsigned-pd:adsp:0:1', NODES: ''}}
+
+camera:
+  raw:
+    setup:
+      - '-V ''"{sensor}":0[fmt:SRGGB10_1X10/4056x3040]'''
+      - '-V ''"msm_csiphy0":0[fmt:SRGGB10_1X10/4056x3040]'''
+      - '-V ''"msm_csid0":0[fmt:SRGGB10_1X10/4056x3040]'''
+      - '-V ''"msm_vfe0_rdi0":0[fmt:SRGGB10_1X10/4056x3040]'''
+      - '-l ''"msm_csiphy0":1->"msm_csid0":0[1]'''
+      - '-l ''"msm_csid0":1->"msm_vfe0_rdi0":0[1]'''
+    video: msm_vfe0_video0
+    pixelformat: pRAA
+    width: 4056
+    height: 3040
+
+modules:
+  audioreach: false
+
+# the DSP restart and, after it, the compress case leave audio changed:
+# after a compress offload stream MultiMedia2 playback stays silent until
+# the next boot
+run_last:
+  - audio.ssr
+  - audio.case case=compress
+
+platform:
+  sleep_stats: /sys/kernel/debug/qcom_stats
+
+# Hardware this board does not have, with what would enable the tests
+# that need it. A test that finds the interface missing reports skip
+# with this reason instead of fail.
+absent:
+  DSI: the EVK has no DSI panel fitted (a panel, its DT node and its panel driver enable these tests)
+  DP-sink: on the LAVA EVKs the USB-C partner is the lab USB connection (a DP monitor or a DP EDID dummy plug enables these tests)
+  HDMI-A-sink: no monitor or EDID dummy plug on the HDMI port of this EVK
+  backlight: the EVK drives no panel backlight (a DSI panel with its backlight enables this test)
+  touch: no touch controller is fitted to the EVK
+  displays-2: the EVK has one HDMI port and no DSI panel; a DSI panel or a DP sink enables this test
+  displays-3: the EVK has one HDMI port and no DSI panel; a DSI panel and a DP sink enable this test
+  audio-analyzer: the on-board speakers and DMICs are an acoustic loop, not a calibrated measurement path
+  camera-sensor: a camera module (the reference IMX577 on CAM0) is not fitted on every EVK
