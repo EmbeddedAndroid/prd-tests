@@ -4,7 +4,9 @@ Every {NAME} in a template is replaced by the environment variable NAME
 when it is set (or by an explicit value passed in); unset placeholders
 stay in the output so the job can be finished by hand. ARTIFACT_HEADER
 ("Name: value"), when set, is added as the HTTP header of every deploy
-URL (for artifact stores that need one)."""
+URL of the image under test (for artifact stores that need one);
+STOCK_ARTIFACT_HEADER, when set, is the header of the stock image URL in
+the backstop (the stock store needs its own, not the test image's)."""
 import os
 import re
 
@@ -23,8 +25,8 @@ def load(name, values=None):
     return yaml.safe_load(fill(open(os.path.join(HERE, name)).read(), values))
 
 
-def headers():
-    h = os.environ.get('ARTIFACT_HEADER')
+def headers(var='ARTIFACT_HEADER'):
+    h = os.environ.get(var)
     if not h:
         return None
     k, _, val = h.partition(':')
@@ -41,7 +43,7 @@ def add_url(d, url):
 
 def backstop(device, tag):
     b = load('backstop.yaml', {'DEVICE': device})
-    h = headers()
+    h = headers('STOCK_ARTIFACT_HEADER')
     if h:
         b['actions'][0]['deploy']['qcomflash']['headers'] = h
     b['job_name'] = 'eliza-evk backstop %s (stock restore)' % tag

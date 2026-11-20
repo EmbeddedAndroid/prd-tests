@@ -60,7 +60,8 @@ when it is set and leaves the rest for you to fill in:
 | `{OVERLAY_URL}` | URL of the video probe overlay (`video/scripts/stage-overlay.sh`) |
 | `{STOCK_IMAGE_URL}`, `{STOCK_IMAGE_DIR}` | the lab's stock health-check qcomflash tarball and its top directory, for the backstop |
 | `{STOCK_UEFI_VERSION}` | UEFI version string the stock image prints, matched by the backstop |
-| `ARTIFACT_HEADER` | optional `Name: value` HTTP header added to every deploy URL (for artifact stores that need one) |
+| `ARTIFACT_HEADER` | optional `Name: value` HTTP header added to every deploy URL of the image under test (for artifact stores that need one) |
+| `STOCK_ARTIFACT_HEADER` | optional `Name: value` HTTP header for the stock image URL in the backstop |
 | `ACDB_URL`, `ACDB_MD5` | optional, audio PAL only: tar with the board ACDB (not in this repository) and its md5 |
 
 Console tests (camera, HDMI, Weston): the commands are in the area
