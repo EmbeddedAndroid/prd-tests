@@ -143,6 +143,19 @@ product on several boards and tabulate it:
     python3 tools/matrix.py --product products/generic.yaml EVK=<job> RB3=<job> VM=vm-out/results.jsonl
 
 The current matrix is in `results/matrix.md`.
+Totals of the current run (pass/partial/fail/skip of 72):
+
+| platform | pass | partial | fail | skip |
+|---|---|---|---|---|
+| virtual x86_64 (QEMU + KVM) | 35 | 5 | 12 (all `known_fail`) | 20 |
+| virtual arm64 (native) | 35 | 5 | 12 (all `known_fail`) | 20 |
+| virtual, no drivers | 2 | 0 | 3 | 67 |
+| Eliza EVK | 31 | 5 | 16 | 20 |
+| RB3 Gen 2 | 36 | 5 | 3 | 28 |
+| IQ-9075 EVK | 36 | 5 | 4 | 27 |
+| IQ-8275 EVK | 36 | 4 | 4 | 28 |
+| Glymur CRD | 37 | 4 | 4 | 27 |
+| VENTUNO Q | 30 | 4 | 5 | 33 |
 
 ## Adding a board
 
