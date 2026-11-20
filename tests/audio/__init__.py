@@ -174,14 +174,15 @@ class Audio:
     def f(self, name):
         return os.path.join(self.tmp, name)
 
+    # plughw: ALSA converts channels, rate and format where a PCM needs it
     def record(self, path, secs, dev=None):
-        return subprocess.Popen(['arecord', '-q', '-D', 'hw:%d,%d' % (self.card, self.cdev if dev is None else dev),
+        return subprocess.Popen(['arecord', '-q', '-D', 'plughw:%d,%d' % (self.card, self.cdev if dev is None else dev),
                                  '-t', 'raw', '-f', 'S16_LE', '-r', str(RATE), '-c', '2', '-d',
                                  str(int(math.ceil(secs))), path],
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
     def play(self, path, dev=None, extra=None):
-        return subprocess.Popen(['aplay', '-q', '-D', 'hw:%d,%d' % (self.card, self.pdev if dev is None else dev),
+        return subprocess.Popen(['aplay', '-q', '-D', 'plughw:%d,%d' % (self.card, self.pdev if dev is None else dev),
                                  '-t', 'raw', '-f', 'S16_LE', '-r', str(RATE), '-c', '2'] +
                                 (extra or []) + [path],
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -530,7 +531,7 @@ def t_pause_resume(env, pause_s=30):
     time.sleep(0.5)
     # aplay -i only reads keys from a terminal
     master, slave = pty.openpty()
-    p = subprocess.Popen(['aplay', '-q', '-i', '-D', 'hw:%d,%d' % (a.card, a.pdev), '-t', 'raw',
+    p = subprocess.Popen(['aplay', '-q', '-i', '-D', 'plughw:%d,%d' % (a.card, a.pdev), '-t', 'raw',
                           '-f', 'S16_LE', '-r', str(RATE), '-c', '2', src],
                          stdin=slave, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     os.close(slave)
@@ -602,7 +603,7 @@ class Stream:
     frames to CLOCK_MONOTONIC."""
 
     def __init__(self, a, secs):
-        self.p = subprocess.Popen(['arecord', '-q', '-D', 'hw:%d,%d' % (a.card, a.cdev), '-t', 'raw',
+        self.p = subprocess.Popen(['arecord', '-q', '-D', 'plughw:%d,%d' % (a.card, a.cdev), '-t', 'raw',
                                    '-f', 'S16_LE', '-r', str(RATE), '-c', '2', '--period-size=240',
                                    '-d', str(secs)], stdout=subprocess.PIPE)
         self.data = bytearray()
@@ -707,7 +708,7 @@ def t_capture_start(env):
     a.route()
     time.sleep(12)
     t0 = time.monotonic()
-    p = subprocess.Popen(['arecord', '-q', '-D', 'hw:%d,%d' % (a.card, a.cdev), '-t', 'raw', '-f',
+    p = subprocess.Popen(['arecord', '-q', '-D', 'plughw:%d,%d' % (a.card, a.cdev), '-t', 'raw', '-f',
                           'S16_LE', '-r', str(RATE), '-c', '2', '--period-size=240', '-d', '2'],
                          stdout=subprocess.PIPE)
     b = p.stdout.read(960)
