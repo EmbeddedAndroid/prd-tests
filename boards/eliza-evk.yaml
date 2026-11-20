@@ -150,8 +150,18 @@ camera:
     width: 4056
     height: 3040
 
+# CamX (modules.camx): the IMX577 on CAM0 and the OV9282 (mono) on CAM1,
+# ids as the camera service numbers them. No CamX image runs on this
+# board yet: the module is off and the camera values are not verified.
+camx:
+  service: qti-cam-server
+  cameras:
+    - {id: 0, width: 1920, height: 1080, fps: 30, format: NV12}
+    - {id: 1, width: 1280, height: 800, fps: 30, format: NV12}
+
 modules:
   audioreach: false
+  camx: false
 
 # the DSP restart and, after it, the compress case leave audio changed:
 # after a compress offload stream MultiMedia2 playback stays silent until
