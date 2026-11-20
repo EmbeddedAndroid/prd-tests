@@ -1,19 +1,29 @@
 name: virtual
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 jobs:
   virtual:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        include:
+          - runner: ubuntu-24.04
+            vm: qemu
+          # no KVM on the arm64 runners: run on the runner's own kernel
+          - runner: ubuntu-24.04-arm
+            vm: native
     runs-on: ${{ matrix.runner }}
+    env:
+      PRD_VM: ${{ matrix.vm }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - name: let QEMU use KVM where the runner has it
         run: test -e /dev/kvm && sudo chmod 666 /dev/kvm || true
       - run: sh tools/vm/setup-host.sh
-      - run: sudo sh tools/vm/run.sh full
+      - run: sudo -E sh tools/vm/run.sh full
       - run: python3 tools/vm/expect.py vm-out full
-      - run: sudo sh tools/vm/run.sh bare
+      - run: sudo -E sh tools/vm/run.sh bare
       - run: python3 tools/vm/expect.py vm-out-bare bare

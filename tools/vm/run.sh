@@ -4,27 +4,28 @@
 # runs without loading the virtual drivers, to show the tests do not
 # pass on hardware that is not there.
 #
-# With KVM: boot Ubuntu's generic kernel in QEMU with virtme-ng on the
-# host root file system and a software TPM (swtpm) attached. Without KVM
-# (an arm64 cloud VM or CI runner, itself a QEMU/KVM guest): emulating
-# the guest is too slow for udev, so the suite runs on the host's own
-# kernel instead, the same drivers loaded into it and swtpm behind
-# tpm_vtpm_proxy. PRD_VM=qemu or PRD_VM=native forces one. Needs
-# tools/vm/setup-host.sh; native mode loads modules on the host.
+# Default: boot Ubuntu's generic kernel in QEMU with virtme-ng on the
+# host root file system and a software TPM (swtpm) attached. PRD_VM=native
+# (for an arm64 cloud VM or CI runner without KVM, where an emulated guest
+# is too slow for udev; such a host is a QEMU/KVM guest itself) runs the
+# suite on the host's own kernel instead, with the same drivers loaded and
+# swtpm behind tpm_vtpm_proxy. Native mode stops PipeWire and WirePlumber
+# and unbinds the framebuffer console for the run: use it on a throwaway
+# VM, not a workstation. Needs tools/vm/setup-host.sh.
 set -eu
 top=$(cd "$(dirname "$0")/../.." && pwd)
 mode=${1:-full}
 product=${2:-products/generic.yaml}
 out=$top/vm-out; [ "$mode" = bare ] && out=$top/vm-out-bare
 rm -rf "$out"; mkdir -p "$out"
-mode_vm=${PRD_VM:-}
-[ -n "$mode_vm" ] || { [ -w /dev/kvm ] && mode_vm=qemu || mode_vm=native; }
+mode_vm=${PRD_VM:-qemu}
 tpm=$(mktemp -d)
 if [ "$mode_vm" = native ]; then
 	# a desktop session's media daemons hold the cameras and the sound
 	# card; seatd may have left its socket behind
 	for p in wireplumber pipewire pipewire-pulse; do pkill -x "$p" 2>/dev/null || true; done
-	rm -f /run/seatd.sock
+	pgrep -x seatd >/dev/null || rm -f /run/seatd.sock
+	before=$(for m in vkms vimc vicodec vivid snd_aloop; do [ ! -d "/sys/module/$m" ] || echo "$m"; done)
 	if [ "$mode" = bare ]; then
 		for m in vkms vimc vicodec vivid snd_aloop; do
 			if [ -d "/sys/module/$m" ]; then
@@ -37,12 +38,24 @@ if [ "$mode_vm" = native ]; then
 	swtpm chardev --vtpm-proxy --tpm2 --tpmstate dir="$tpm" --pid file="$tpm/pid" --daemon > "$out/swtpm.log" 2>&1 || true
 	sh "$top/tools/vm/inside.sh" "$mode" "$product" "$out" > "$out/console.log" 2>&1 || true
 	if [ "$mode" = full ]; then
-		# leave the host as it was for the bare run; the framebuffer
-		# console holds vkms until it is unbound
+		# unload what this run loaded; the framebuffer console holds vkms
+		# until it is unbound, and is bound again after
+		unbound=
 		for vt in /sys/class/vtconsole/vtcon*; do
-			grep -q "frame buffer" "$vt/name" 2>/dev/null && echo 0 > "$vt/bind" 2>/dev/null || true
+			if grep -q "frame buffer" "$vt/name" 2>/dev/null && [ "$(cat "$vt/bind")" = 1 ]; then
+				echo 0 > "$vt/bind" 2>/dev/null && unbound="$unbound $vt"
+			fi
 		done
-		for m in vkms vimc vicodec vivid snd_aloop; do modprobe -r "$m" 2>/dev/null || true; done
+		# the compositor may still be closing the card for a moment
+		for m in vkms vimc vicodec vivid snd_aloop; do
+			echo "$before" | grep -qx "$m" && continue
+			i=0
+			while [ -d "/sys/module/$m" ] && [ $i -lt 10 ]; do
+				modprobe -r "$m" 2>/dev/null || sleep 1
+				i=$((i + 1))
+			done
+		done
+		for vt in $unbound; do echo 1 > "$vt/bind" 2>/dev/null || true; done
 	fi
 	tail -5 "$out/console.log"
 	[ -s "$tpm/pid" ] && kill "$(cat "$tpm/pid")" 2>/dev/null || true

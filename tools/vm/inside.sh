@@ -6,11 +6,11 @@ top=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$top" || exit 1
 mountpoint -q /sys/kernel/debug || mount -t debugfs none /sys/kernel/debug
 if [ "$mode" = full ]; then
-	modprobe vkms enable_writeback=1 enable_overlay=1 enable_cursor=1
-	modprobe vimc
-	modprobe vicodec
-	modprobe vivid n_devs=1 node_types=0x1
-	modprobe snd-aloop
+	modprobe vkms enable_writeback=1 enable_overlay=1 enable_cursor=1 || exit 1
+	modprobe vimc || exit 1
+	modprobe vicodec || exit 1
+	modprobe vivid n_devs=1 node_types=0x1 || exit 1
+	modprobe snd-aloop || exit 1
 fi
 udevadm trigger 2>/dev/null; udevadm settle 2>/dev/null
 # a registry of this VM's own, not one a host user left behind
