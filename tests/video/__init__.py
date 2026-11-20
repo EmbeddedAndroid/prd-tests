@@ -43,12 +43,14 @@ class Video:
             c['role'], c['dev'].path, c['dev'].card, c['dev'].driver, ' '.join(c['coded']))
             for c in self.codecs) or 'none', flush=True)
 
-    def find(self, role, codec):
-        cs = [c for c in self.codecs if c['role'] == role and codec in c['coded']]
+    def find(self, role, codec=None):
+        """First codec device of a role taking codec (any codec for None)."""
+        cs = [c for c in self.codecs if c['role'] == role and (codec is None or codec in c['coded'])]
         if not cs:
             have_ = sorted(set(f for c in self.codecs if c['role'] == role for f in c['coded']))
             raise Missing('no V4L2 %s takes %s (%s formats: %s)' % (
-                role, codec, role, ' '.join(have_) or 'none'), hw='video-%s-%s' % (role, codec))
+                role, codec or 'any coded format', role, ' '.join(have_) or 'none'),
+                hw='video-%s-%s' % (role, codec) if codec else 'video-%s' % role)
         return cs[0]
 
     def element(self, role, codec):
@@ -107,10 +109,11 @@ def out_caps(txt, elem):
 
 # ---- discovery
 @test('video.codec')
-def t_codec(env, role, codec):
-    """A V4L2 decoder or encoder for a codec, with its frame size range"""
+def t_codec(env, role, codec=None):
+    """A V4L2 decoder or encoder for a codec (any, when none is named), with its frame sizes"""
     v = V(env)
     c = v.find(role, codec)
+    codec = codec or c['coded'][0]
     fs = c['dev'].framesizes(codec)
     meas = {'max_width': fs[2], 'max_height': fs[3]} if fs else {}
     return ('pass', '%s %s on %s (%s, %s); coded sizes %s; raw formats %s' % (
@@ -119,7 +122,7 @@ def t_codec(env, role, codec):
 
 
 @test('video.raw_formats')
-def t_raw_formats(env, role, codec='H264'):
+def t_raw_formats(env, role, codec=None):
     """Raw pixel formats on the uncompressed side of a codec"""
     v = V(env)
     c = v.find(role, codec)
@@ -128,7 +131,7 @@ def t_raw_formats(env, role, codec='H264'):
 
 
 @test('video.controls')
-def t_controls(env, names, role='encoder', codec='H264'):
+def t_controls(env, names, role='encoder', codec=None):
     """Codec controls exposed by the V4L2 device (by V4L2 control name)"""
     v = V(env)
     c = v.find(role, codec)

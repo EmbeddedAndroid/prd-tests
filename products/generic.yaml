@@ -1,9 +1,8 @@
 # Generic product: one requirement per generic test, so every test runs on
-# every board and the results form the test x platform matrix. The
-# board codec is the one the virtual board has (FWHT, vicodec); real
-# boards answer the H.264 rows. A missing interface is a skip here
-# ("missing: skip"): the matrix asks which interfaces work, not which
-# features a product needs. See README.md.
+# every board and the results form the test x platform matrix. Codec rows
+# without a codec take the device's first coded format; H.264 rows ask
+# for H.264. A missing interface is a skip here ("missing: skip"): the
+# matrix asks which interfaces work, not which features a product needs.
 product: generic
 title: Every generic test once
 missing: skip
@@ -182,21 +181,21 @@ requirements:
     test: audio.quality
     args: {what: playback THD+N}
   GVI-001:
-    title: "V4L2 decoder for the board codec"
+    title: "V4L2 decoder"
     test: video.codec
-    args: {codec: FWHT, role: decoder}
+    args: {role: decoder}
   GVI-002:
-    title: "V4L2 encoder for the board codec"
+    title: "V4L2 encoder"
     test: video.codec
-    args: {codec: FWHT, role: encoder}
+    args: {role: encoder}
   GVI-003:
     title: "Decoder raw formats"
     test: video.raw_formats
-    args: {codec: FWHT, role: decoder}
+    args: {role: decoder}
   GVI-004:
     title: "Encoder raw formats"
     test: video.raw_formats
-    args: {codec: FWHT, role: encoder}
+    args: {role: encoder}
   GVI-005:
     title: "Encode and decode with v4l2-ctl"
     test: video.v4l2ctl_roundtrip

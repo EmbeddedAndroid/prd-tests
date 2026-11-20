@@ -34,8 +34,10 @@ def t_remoteproc(env, names=None, restart=False):
     want = names or sorted(rp)
     missing = [n for n in want if n not in rp]
     states = {n: read(rp[n] + '/state').strip() for n in want if n in rp}
-    down = [n for n, s in states.items() if s != 'running']
-    meas = {'running': sorted(n for n, s in states.items() if s == 'running')}
+    # attached: running firmware the boot loader started, which Linux took over
+    up = ('running', 'attached')
+    down = [n for n, s in states.items() if s not in up]
+    meas = {'running': sorted(n for n, s in states.items() if s in up)}
     if missing or down:
         return 'fail', 'remoteproc %s; missing %s, not running %s' % (states, missing, down), meas
     if not restart:

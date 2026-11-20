@@ -259,6 +259,7 @@ def t_pcm_caps(env, direction='playback'):
     dev = a.pdev if d == 'p' else a.cdev
     if dev is None:
         raise Missing('no %s PCM on card %d' % (direction, a.card), hw='audio-%s' % direction)
+    a.route()       # a front end may open only with its route set
     fm, ch, rt, out = hw_ranges(a, d, dev)
     if not fm:
         return 'fail', 'hw params of hw:%d,%d not readable: %s' % (a.card, dev, out.strip()[-200:])
@@ -438,6 +439,8 @@ def t_ssr(env):
     """DSP restart: the audio DSP is stopped and restarted and playback works after"""
     a = A(env)
     name = env.cfg('audio', 'dsp')
+    if not name:
+        raise Missing('the board profile names no audio DSP (audio.dsp)', hw='audio-dsp')
     rp = None
     for d in sorted(os.listdir('/sys/class/remoteproc')) if os.path.isdir('/sys/class/remoteproc') else []:
         if name and read('/sys/class/remoteproc/%s/name' % d).strip() == name:
