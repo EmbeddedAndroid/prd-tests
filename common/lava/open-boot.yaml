@@ -1,0 +1,78 @@
+# Deploy, boot, cold-boot firmware fingerprint check and login for an
+# eliza-evk-emmc-open-fw qcomflash package on a LAVA eliza-evk-emmc
+# device. The job generators append their test actions after these five
+# actions. Placeholders ({NAME}) are documented in the top-level README.
+device_type: eliza-evk-emmc
+job_name: eliza-evk open-boot {IMAGE_DIR} {FP}
+priority: low
+visibility: public
+timeouts:
+  job:
+    minutes: 75
+  action:
+    minutes: 10
+  connection:
+    minutes: 2
+context:
+  test_character_delay: 10
+actions:
+- deploy:
+    to: qdl
+    rootfs_image: '{IMAGE_DIR}/rootfs.img'
+    qcomflash:
+      url: '{IMAGE_URL}'
+      format: ext4
+      overlays:
+        lava: true
+    timeout:
+      minutes: 40
+      skip: true
+- boot:
+    method: qdl
+    firehose_program: xbl_s_devprg_ns.melf
+    rawprogram: rawprogram0.xml rawprogram1.xml
+    patch: patch0.xml patch1.xml
+    path: '{IMAGE_DIR}'
+    storage: emmc
+    timeout:
+      minutes: 15
+      skip: true
+- boot:
+    method: minimal
+    timeout:
+      minutes: 1
+      skip: true
+- test:
+    monitors:
+    - name: firmware-fingerprint-cold
+      start: SBL1, End
+      end: Booting Linux on physical CPU
+      pattern: "(?P<test_case_id>OP-TEE version(?=[^\r\n]*?{FP})|U-Boot SPL(?=[^\r\n]*?{FP})|U-Boot(?=[^\r\n]*?{FP})|BL31(?=[^\r\n]*?{FP})|BL2(?=[^\r\n]*?{FP}))[^\\r\\n]*?(?P<result>{FP})"
+      fixupdict:
+        '{FP}': pass
+      expected:
+      - bl2
+      - bl31
+      - op_tee_version
+      - u_boot
+    timeout:
+      minutes: 4
+      skip: true
+- boot:
+    method: minimal
+    reset: false
+    auto_login:
+      login_prompt: 'login:'
+      username: root
+      login_commands:
+      - dmesg -n 1
+      - mkdir -p /lava-ovl; mountpoint -q /lava-ovl || mount --bind / /lava-ovl
+      password_prompt: Password
+      password: '{ROOT_PW}'
+    prompts:
+    - root@eliza-evk-emmc-open-fw:[/~]#
+    - root@(.*):[/~]#
+    timeout:
+      minutes: 10
+      skip: true
+device: '{DEVICE}'

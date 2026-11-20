@@ -1,0 +1,47 @@
+# Stock restore after a test job on the same device: flash the lab's
+# stock health-check image and check its UEFI version banner. Submit it
+# right after the test job so the board is never left on a test image.
+device_type: eliza-evk-emmc
+job_name: eliza-evk stock restore backstop
+priority: low
+visibility: public
+timeouts:
+  job:
+    minutes: 60
+  action:
+    minutes: 10
+  connection:
+    minutes: 2
+actions:
+- deploy:
+    to: qdl
+    qcomflash:
+      url: '{STOCK_IMAGE_URL}'
+    timeout:
+      minutes: 30
+- boot:
+    method: qdl
+    firehose_program: xbl_s_devprg_ns.melf
+    rawprogram: rawprogram0.xml rawprogram1.xml
+    patch: patch0.xml patch1.xml
+    path: '{STOCK_IMAGE_DIR}'
+    storage: emmc
+    timeout:
+      minutes: 20
+- boot:
+    method: minimal
+    timeout:
+      minutes: 3
+- test:
+    timeout:
+      minutes: 10
+    monitors:
+    - name: stock-restore
+      start: SBL1, End
+      end: UEFI Total
+      pattern: (?P<test_case_id>UEFI Ver)\s*:\s*(?P<result>{STOCK_UEFI_VERSION})
+      fixupdict:
+        '{STOCK_UEFI_VERSION}': pass
+      expected:
+      - uefi_ver
+device: '{DEVICE}'
