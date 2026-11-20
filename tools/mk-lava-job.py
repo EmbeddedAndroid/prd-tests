@@ -9,7 +9,10 @@ product's requirements with tools/run.py from the overlay.
 
 Deploy and boot come from the board profile's lava section (device type,
 storage, firehose programmer, rawprogram and patch files, image
-directory, shell prompt, optional priority, default low). With
+directory, shell prompt, optional priority, default low; lava.flash
+lists several qdl steps where the image flashes more than one storage;
+lava.username, login_first (commands right after login, before the
+shell is set up) and prompts for images that log in differently). With
 lava.firmware_fingerprint the job checks
 the build fingerprint on the cold boot firmware banners, the kernel
 release and lava.rootfs_fingerprint before any test; with lava.backstop
@@ -46,29 +49,40 @@ def env(name, default=None):
     return v
 
 
-def deploy(image_url, image_dir, hdr, overlays=None):
+def deploy(image_url, image_dir, hdr, overlays=None, rootfs=None):
     q = {'url': image_url}
     if hdr:
         q['headers'] = hdr
     q['format'] = 'ext4'
     q['overlays'] = {'lava': True}
     q['overlays'].update(overlays or {})
-    return {'deploy': {'to': 'qdl', 'rootfs_image': '%s/rootfs.img' % image_dir,
+    return {'deploy': {'to': 'qdl', 'rootfs_image': rootfs or '%s/rootfs.img' % image_dir,
                        'qcomflash': q, 'timeout': {'minutes': 40}}}
 
 
-def qdl_boot(lv, image_dir, minutes=15):
-    return {'boot': {'method': 'qdl', 'firehose_program': lv['firehose'],
-                     'rawprogram': ' '.join(lv['rawprogram']), 'patch': ' '.join(lv['patch']),
-                     'path': image_dir, 'storage': lv['storage'], 'timeout': {'minutes': minutes}}}
+def qdl_boot(st, image_dir, minutes=15):
+    """One qdl flash step: st carries firehose, rawprogram, patch, storage
+    and an optional path below the image directory."""
+    path = os.path.join(image_dir, st['path']) if st.get('path') else image_dir
+    return {'boot': {'method': 'qdl', 'firehose_program': st['firehose'],
+                     'rawprogram': ' '.join(st['rawprogram']), 'patch': ' '.join(st['patch']),
+                     'path': path, 'storage': st['storage'], 'timeout': {'minutes': minutes}}}
+
+
+def flash_steps(lv):
+    """lava.flash (several storages, flashed in order) or the single step
+    given by lava.storage, firehose, rawprogram and patch."""
+    return lv.get('flash') or [lv]
 
 
 def login(lv, reset=True):
     b = {'method': 'minimal',
-         'auto_login': {'login_prompt': 'login:', 'username': 'root',
+         'auto_login': {'login_prompt': 'login:', 'username': lv.get('username', 'root'),
                         'password_prompt': 'Password', 'password': env('ROOT_PW'),
-                        'login_commands': ['dmesg -n 1'] + lv.get('login_commands', [])},
-         'prompts': [lv['prompt'], 'root@(.*):[/~]#'], 'timeout': {'minutes': 10}}
+                        'login_commands': lv.get('login_first', []) + ['dmesg -n 1'] +
+                        lv.get('login_commands', [])},
+         'prompts': lv.get('prompts', []) + [lv['prompt'], 'root@(.*):[/~]#'],
+         'timeout': {'minutes': 10}}
     if not reset:
         b['reset'] = False
     return skip(lv, {'boot': b})
@@ -114,8 +128,9 @@ def main():
     prd = {'format': 'tar', 'path': '/', 'url': env('PRD_URL')}
     if header('PRD_HEADER'):
         prd['headers'] = header('PRD_HEADER')
-    acts = [skip(lv, deploy(env('IMAGE_URL'), image_dir, header('ARTIFACT_HEADER'), {'prd': prd})),
-            skip(lv, qdl_boot(lv, image_dir))]
+    acts = [skip(lv, deploy(env('IMAGE_URL'), image_dir, header('ARTIFACT_HEADER'), {'prd': prd},
+                           lv.get('rootfs_image'))),
+            ] + [skip(lv, qdl_boot(st, image_dir)) for st in flash_steps(lv)]
     if lv.get('firmware_fingerprint'):
         acts += [skip(lv, {'boot': {'method': 'minimal', 'timeout': {'minutes': 1}}}),
                  skip(lv, fp_monitor(a.fp)), login(lv, reset=False)]
@@ -164,7 +179,7 @@ def main():
               'metadata': {'purpose': 'stock restore backstop after %s' % a.tag},
               'actions': [{'deploy': {'to': 'qdl', 'qcomflash': {'url': env('STOCK_IMAGE_URL')},
                                       'timeout': {'minutes': 30}}},
-                          qdl_boot(lv, env('STOCK_IMAGE_DIR'), 20),
+                          qdl_boot(flash_steps(lv)[-1], env('STOCK_IMAGE_DIR'), 20),
                           {'boot': {'method': 'minimal', 'timeout': {'minutes': 3}}},
                           {'test': {'timeout': {'minutes': 10}, 'monitors': [{
                               'name': 'stock-restore', 'start': 'SBL1, End', 'end': 'UEFI Total',
