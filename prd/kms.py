@@ -24,6 +24,7 @@ def _iow(nr, size):
     return (1 << 30) | (size << 16) | (0x64 << 8) | nr
 
 
+VERSION = _iowr(0x00, 64)
 SET_CLIENT_CAP = _iow(0x0d, 16)
 SET_MASTER = (0x64 << 8) | 0x1e
 GETRESOURCES = _iowr(0xa0, 64)
@@ -122,6 +123,17 @@ class Card:
                 if e.errno in (errno.EINTR, errno.EAGAIN):
                     continue
                 raise DrmError(e.errno, '%s (ioctl 0x%x)' % (os.strerror(e.errno), req & 0xff))
+
+    def driver_name(self):
+        """DRM driver name (DRM_IOCTL_VERSION)."""
+        name = ctypes.create_string_buffer(64)
+        b = bytearray(struct.pack('<iii4xQQQQQQ', 0, 0, 0, 64, ctypes.addressof(name), 0, 0, 0, 0))
+        try:
+            self.ioctl(VERSION, b)
+        except DrmError:
+            return ''
+        n = struct.unpack_from('<Q', b, 16)[0]
+        return name.raw[:min(n, 64)].decode('ascii', 'replace')
 
     def set_master(self):
         try:

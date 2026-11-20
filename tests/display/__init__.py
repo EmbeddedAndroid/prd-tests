@@ -11,8 +11,9 @@ display.external); they skip when no sink is attached.
 
 Board profile keys used: display.primary, display.external (connector
 types), display.compositor (systemd unit holding DRM master, default
-weston), display.wayland (XDG_RUNTIME_DIR and WAYLAND_DISPLAY of the
-compositor), absent.<key> for hardware the board does not have
+weston) or display.compositor_cmd (a command to start it where there is
+no systemd), display.wayland (XDG_RUNTIME_DIR and WAYLAND_DISPLAY of the
+compositor), display.software_gl (accept a software GL renderer), absent.<key> for hardware the board does not have
 (<type> for a connector type, <type>-sink for a sink, writeback,
 backlight, touch, displays-<n>)."""
 import atexit
@@ -35,24 +36,48 @@ RED, GREEN, BLUE, WHITE, BLACK = (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 25
 
 class Display:
     """Discovery and DRM master handling. KMS tests need DRM master, so
-    the compositor unit is stopped for them and started again for the
-    Wayland tests and at exit."""
+    the compositor is stopped for them and started again for the Wayland
+    tests and at exit. The compositor is a systemd unit (display.
+    compositor, default weston) or, on systems without systemd, a
+    command the runner starts and stops itself (display.compositor_cmd)."""
 
     def __init__(self, env):
         self.env = env
         self.unit = env.cfg('display', 'compositor', default='weston')
-        rc, out = sh('systemctl is-active %s 2>/dev/null' % self.unit)
-        self.unit_was_active = out.strip() == 'active'
+        self.cmd = env.cfg('display', 'compositor_cmd')
+        self.proc = None
+        self.unit_was_active = not self.cmd and self.state() == 'active'
         self.card = None
         self.wb_empty = 0
         atexit.register(self.restore)
+
+    def state(self):
+        if self.cmd:
+            return 'active' if self.proc and self.proc.poll() is None else 'inactive'
+        return sh('systemctl is-active %s 2>/dev/null' % self.unit)[1].strip()
+
+    def stop(self):
+        if self.cmd:
+            if self.proc and self.proc.poll() is None:
+                os.killpg(self.proc.pid, 15)
+                self.proc.wait()
+        elif self.state() == 'active':
+            sh('systemctl stop %s %s.socket 2>/dev/null' % (self.unit, self.unit))
+
+    def start(self):
+        if self.cmd:
+            self.log = os.path.join('/tmp', 'prd-compositor.log')
+            self.proc = subprocess.Popen(self.cmd, shell=True, stdout=open(self.log, 'w'),
+                                         stderr=subprocess.STDOUT, start_new_session=True)
+        else:
+            sh('systemctl start %s 2>/dev/null' % self.unit)
+        time.sleep(3)
 
     # ---- master
     def kms(self):
         if self.card:
             return self
-        if sh('systemctl is-active %s 2>/dev/null' % self.unit)[1].strip() == 'active':
-            sh('systemctl stop %s %s.socket 2>/dev/null' % (self.unit, self.unit))
+        self.stop()
         # the compositor may take a moment to drop DRM master
         held = False
         for i in range(20):
@@ -91,25 +116,31 @@ class Display:
 
     def compositor(self):
         """Close KMS and make sure the compositor runs; returns its state
-        and, when it does not run, the end of its journal."""
+        and, when it does not run, the end of its log."""
         self.release()
-        if sh('systemctl is-active %s 2>/dev/null' % self.unit)[1].strip() != 'active':
-            sh('systemctl start %s 2>/dev/null' % self.unit)
-            time.sleep(3)
-        st = sh('systemctl is-active %s 2>/dev/null' % self.unit)[1].strip()
+        if self.state() != 'active':
+            self.start()
+        st = self.state()
         log = ''
         if st != 'active':
-            log = sh('journalctl -b -u %s --no-pager -n 8 2>&1' % self.unit)[1].strip()
+            log = read(self.log)[-600:] if self.cmd else \
+                sh('journalctl -b -u %s --no-pager -n 8 2>&1' % self.unit)[1].strip()
         return st, log
+
+    def pid(self):
+        if self.cmd:
+            return str(self.proc.pid) if self.proc else ''
+        return sh('systemctl show -p MainPID --value %s' % self.unit)[1].strip()
 
     def restore(self):
         self.release()
-        if self.unit_was_active:
+        if self.cmd:
+            self.stop()
+        elif self.unit_was_active:
             sh('systemctl start %s 2>/dev/null' % self.unit)
 
     def driver(self):
-        n = os.path.basename(self.card.path)
-        return os.path.basename(os.path.realpath('/sys/class/drm/%s/device/driver' % n))
+        return self.card.driver_name()
 
     # ---- lookups
     def cprop(self, conn, name):
@@ -285,6 +316,17 @@ def compose_once(d, layers, crtc_extra=None, wb_fmt=XR24, w=WB_W, h=WB_H, test_o
            d.wb['id']: {wp['CRTC_ID'][0]: crtc, wp['WRITEBACK_FB_ID'][0]: capfb}}
     if not test_only:
         req[d.wb['id']][wp['WRITEBACK_OUT_FENCE_PTR'][0]] = kms.ctypes.addressof(fence)
+    # whatever else drives this CRTC now (a console framebuffer, an
+    # earlier output) is detached for the capture
+    for k in d.conns:
+        if k['id'] != d.wb['id']:
+            kp = card.props(k['id'], kms.OBJ_CONNECTOR)
+            if kp.get('CRTC_ID', (0, 0))[1] == crtc:
+                req[k['id']] = {kp['CRTC_ID'][0]: 0}
+    for p in d.planes:
+        pc = card.props(p['id'], kms.OBJ_PLANE).get('CRTC_ID', (0, 0))
+        if pc[1] == crtc and p not in cand[:len(layers)]:
+            req[p['id']] = {p['props']['FB_ID'][0]: 0, pc[0]: 0}
     used = []
     err = None
     for L, p in zip(layers, cand):
@@ -512,6 +554,8 @@ def t_edid(env, connector='primary'):
         raw = open(path, 'rb').read()
     except OSError as e:
         return 'fail', 'cannot read %s: %s' % (path, e)
+    if not raw:
+        raise Missing('%s reports no EDID' % k['name'], hw='edid')
     if len(raw) < 128:
         return 'fail', '%s: EDID is %d bytes' % (k['name'], len(raw))
     blocks = edid_blocks(raw)
@@ -955,7 +999,8 @@ def t_rotation(env):
             val = (1 << en['rotate-0']) | (1 << en[name])
         else:
             val = 1 << en[name]
-        cap, err = compose(d, [Layer(fb[0], 128, 128, (0, 0, 128, 128), props={'rotation': val})])
+        cap, err = compose(d, [Layer(fb[0], 128, 128, (0, 0, 128, 128), props={'rotation': val})],
+                           w=128, h=128)
         if err:
             res.append('%s refused (%s)' % (name, err.split(':')[-1].strip()))
             continue
@@ -1221,9 +1266,13 @@ def t_wayland_gl(env, seconds=5, renderer=None, version=None,
     if st != 'active':
         return 'fail', 'compositor unit %s is %s after start; journal: %s' % (
             env.ctx('display').unit, st, log.replace('\n', ' | ')[-600:])
-    e, sock = wl_env(env)
-    if not os.path.exists(sock):
-        return 'fail', 'compositor active but no Wayland socket at %s' % sock
+    for i in range(20):         # a compositor can take seconds to open its socket
+        e, sock = wl_env(env)
+        if os.path.exists(sock):
+            break
+        time.sleep(1)
+    else:
+        return 'fail', 'compositor active but no Wayland socket at %s after 20 s' % sock
     if not have('eglinfo'):
         return 'fail', 'eglinfo not on the image: the EGL renderer cannot be read'
     rc, info = sh('%s eglinfo -B -p wayland 2>&1' % e, timeout=20)
@@ -1232,7 +1281,8 @@ def t_wayland_gl(env, seconds=5, renderer=None, version=None,
     ver = next((l.split(':', 1)[1].strip() for l in info.splitlines()
                 if 'opengl es profile version' in l.lower()), '')
     meas = {'renderer': rend, 'version': ver}
-    if rend and any(x in rend.lower() for x in renderer_not):
+    if rend and any(x in rend.lower() for x in renderer_not) and \
+            not env.cfg('display', 'software_gl', default=False):
         return 'fail', 'EGL renders on a software renderer: %s' % rend, meas
     if renderer and not re.search(renderer, rend or ''):
         return 'fail', 'EGL renderer %s is not the required %s' % (rend or 'unknown', renderer), meas
@@ -1255,7 +1305,7 @@ def t_wayland_gl(env, seconds=5, renderer=None, version=None,
     # the client's own GPU time proves hardware rendering; the compositor's
     # is reported too but may stay flat when it scans the client buffer
     # out on an overlay plane
-    pid = sh('systemctl show -p MainPID --value %s' % env.ctx('display').unit)[1].strip()
+    pid = env.ctx('display').pid()
     w0 = gpu_ns(pid)
     p = subprocess.Popen('%s exec weston-simple-egl' % e, shell=True, stdout=subprocess.PIPE,
                          stderr=subprocess.STDOUT, start_new_session=True)
