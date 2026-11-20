@@ -1,0 +1,45 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: audio-port-stub
+    description: "Software path of an I2S or TDM port with nothing attached:
+      a DAI link to a stub codec, the topology route, a silent stream and
+      the port frame rate. One case per layer; the first failing case names
+      the layer (device tree, topology, DSP port configuration, port
+      clock). Pads, external codec and wiring are not exercised."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - openembedded
+        - debian
+    scope:
+        - functional
+
+params:
+    # ALSA card id or name; empty is the first card.
+    CARD: ""
+    # Prefix of the case names.
+    NAME: "port"
+    # ERE matching the DAI link name (DT link-name or card runtime).
+    LINK: ""
+    # playback or capture
+    DIRECTION: "playback"
+    # Front end PCM name routed to the port.
+    PCM: ""
+    # "<control>=<value>;..." routing PCM to the port.
+    MIXER: ""
+    RATE: "48000"
+    CHANNELS: "2"
+    DURATION: "6"
+    # Allowed frame rate error, percent.
+    TOL_PCT: "2"
+    # ERE of the driver and DSP kernel lines checked for errors.
+    ERRORS: "ASoC|audio"
+    # ERE of a kernel line reporting that the DSP refused a command.
+    DSP_ERE: "DSP returned error|Error \\(-?[0-9]+\\) Processing"
+    WAIT_SECONDS: "60"
+
+run:
+    steps:
+        - cd ./automated/linux/audio-port-stub/
+        - ./audio-port-stub.sh -c "${CARD}" -n "${NAME}" -l "${LINK}" -d "${DIRECTION}" -p "${PCM}" -m "${MIXER}" -r "${RATE}" -k "${CHANNELS}" -S "${DURATION}" -t "${TOL_PCT}" -e "${ERRORS}" -D "${DSP_ERE}" -W "${WAIT_SECONDS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt
