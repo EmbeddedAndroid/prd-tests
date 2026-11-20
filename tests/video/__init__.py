@@ -96,9 +96,13 @@ def out_caps(txt, elem):
     s = m[-1]
     w = re.search(r'width=\(int\)(\d+)', s)
     h = re.search(r'height=\(int\)(\d+)', s)
-    f = re.search(r'format=\(string\)(\w+)', s)
-    return (int(w.group(1)) if w else None, int(h.group(1)) if h else None,
-            f.group(1) if f else None)
+    f = re.search(r'(?<![-\w])format=\(string\)(\w+)', s)
+    f = f.group(1) if f else None
+    if f == 'DMA_DRM':
+        # dmabuf caps carry the layout as a DRM fourcc[:modifier]
+        d = re.search(r'drm-format=\(string\)"?([\w:]+)', s)
+        f = d.group(1) if d else f
+    return (int(w.group(1)) if w else None, int(h.group(1)) if h else None, f)
 
 
 # ---- discovery
@@ -219,7 +223,8 @@ def t_decode_vector(env, codec, vector, expect_format=None):
     desc = '%s %s: %d of %d frames, %sx%s %s' % (dec, vector, n, want, w, h, f)
     if rc:
         return 'fail', desc + '; rc %d: %s' % (rc, gst_err(txt)), meas
-    ok = n == want and (not expect_format or f == expect_format)
+    # GStreamer names (P010_10LE) and DRM fourccs (P010, P010:<modifier>)
+    ok = n == want and (not expect_format or (f or '').startswith(expect_format))
     return ('pass' if ok else 'fail', desc + ('' if ok else '; expected %d frames%s' % (
         want, ' in ' + expect_format if expect_format else '')), meas)
 

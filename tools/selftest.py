@@ -8,7 +8,7 @@ with arguments that test takes, every audio case a product names must be
 defined by each board profile that has audio cases, and every run_last
 entry must name a test and match a product requirement. Regression cases
 cover run_last ordering, shell case status, the latency onset channel,
-codec roles and the per-test time limit. Exit status 1 on any mismatch."""
+codec roles, decoder output caps and the per-test time limit. Exit status 1 on any mismatch."""
 import glob
 import inspect
 import json
@@ -195,6 +195,16 @@ def check_units():
             ('stateless-decoder', ['S264'])]
     if roles != want:
         bad.append('codec roles: got %s' % roles)
+    vi = sys.modules.get('tests.video')
+    if vi is not None:
+        for caps, want in (('d0.GstPad:src: caps = video/x-raw(memory:DMABuf), format=(string)DMA_DRM, '
+                            'drm-format=(string)P010:0x0000000000000000, width=(int)416, height=(int)240',
+                            (416, 240, 'P010:0x0000000000000000')),
+                           ('d0.GstPad:src: caps = video/x-raw, format=(string)NV12, width=(int)1920, '
+                            'height=(int)1080', (1920, 1080, 'NV12'))):
+            got = vi.out_caps(caps, 'd')
+            if got != want:
+                bad.append('out_caps: got %s, want %s' % (got, want))
     r = core.Runner(core.Env({}), tempfile.mkdtemp(prefix='prd-selftest-'))
     st_, why, _ = r.call('fake.slow', {}, limit=1)
     if st_ != 'fail' or 'Timeout' not in why:

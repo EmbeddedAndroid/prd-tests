@@ -758,7 +758,7 @@ requirements:
   VID-025:
     title: "HDR Non-secure Playback"
     tests:
-    - {args: {codec: HEVC, expect_format: P010_10LE, vector: WPP_A_ericsson_MAIN10_2.bit}, test: video.decode_vector}
+    - {args: {codec: HEVC, expect_format: P010, vector: WPP_A_ericsson_MAIN10_2.bit}, test: video.decode_vector}
     - {args: {codec: AV01, vector: av1-1-b10-00-quantizer-00.ivf}, test: video.decode_vector}
   VID-026:
     title: "Output Pixel formats (Decoder)"
