@@ -12,9 +12,10 @@ Without a loopback route in the profile they raise Missing with key
 audio-loopback (skip only where the profile lists it as absent).
 
 Board profile keys (audio.*): card (id or name; default the first card
-with a playback and a capture PCM), play / capture ({pcm: name prefix,
-mixer: 'ctl=value;...'}), mute / unmute (mixer strings), play2 (a second
-playback front end: pcm, mixer, off), volume_step (mixer string of a
+with a playback and a capture PCM), play / capture ({pcm: name prefix or
+device: number, mixer: 'ctl=value;...'}), mute / unmute (mixer strings;
+without them the control capture is taken without playback), play2 (a
+second playback front end: pcm or device, mixer, off), volume_step (mixer string of a
 lower volume), loopback ({freq, min_db}: present when the speaker is
 heard by the microphones), dsp (remoteproc name of the audio DSP),
 cases ({name: {dir, params, hw}}: the parameters of a shell test-definition
@@ -137,8 +138,8 @@ class Audio:
         self.card = c['index']
         self.info = c
         self.pcm = pcms(self.card)
-        self.pdev = self.find('p', (self.cfg.get('play') or {}).get('pcm'))
-        self.cdev = self.find('c', (self.cfg.get('capture') or {}).get('pcm'))
+        self.pdev = self.find('p', self.cfg.get('play'))
+        self.cdev = self.find('c', self.cfg.get('capture'))
         rc, out = sh('amixer -c %d controls' % self.card)
         self.ctls = re.findall(r"name='([^']*)'", out)
         self._sil = None
@@ -146,9 +147,13 @@ class Audio:
             self.card, c['id'], c['driver'], len(self.pcm), len(self.ctls), self.pdev, self.cdev),
             flush=True)
 
-    def find(self, d, prefix):
+    def find(self, d, spec):
+        """PCM device for a profile entry: {device: N} or {pcm: name prefix}."""
+        spec = spec or {}
+        if 'device' in spec:
+            return spec['device'] if (d, spec['device']) in self.pcm else None
         for (dd, dev), name in sorted(self.pcm.items()):
-            if dd == d and (not prefix or name.startswith(prefix)):
+            if dd == d and (not spec.get('pcm') or name.startswith(spec['pcm'])):
                 return dev
         return None
 
@@ -190,11 +195,16 @@ class Audio:
         return cap, p.returncode, out
 
     def silence(self, freq):
-        """Capture while the tone plays with the speaker route muted: the control."""
+        """The control: a capture while the tone plays with the speaker route
+        muted, or without playback where the profile has no mute route."""
         if self._sil is None:
-            mixer(self.card, self.cfg.get('mute'))
-            cap, rc, out = self.play_record(tone(self.f('sil.raw'), freq, 3), 4)
-            mixer(self.card, self.cfg.get('unmute'))
+            if self.cfg.get('mute'):
+                mixer(self.card, self.cfg.get('mute'))
+                cap, rc, out = self.play_record(tone(self.f('sil.raw'), freq, 3), 4)
+                mixer(self.card, self.cfg.get('unmute'))
+            else:
+                cap = self.f('sil-cap.raw')
+                self.record(cap, 4).communicate()
             self._sil = level(cap, freq, 1.0, 2.0)
         return self._sil
 
@@ -226,7 +236,7 @@ def t_cards(env):
 
 def hw_ranges(a, d, dev):
     tool = 'aplay' if d == 'p' else 'arecord'
-    rc, out = sh('timeout 5 %s -D hw:%d,%d --dump-hw-params -d 1 /dev/null 2>&1' % (
+    rc, out = sh('timeout 5 %s -D hw:%d,%d -t raw --dump-hw-params -d 1 /dev/null 2>&1' % (
         tool, a.card, dev), timeout=10)
     fm = re.search(r'FORMAT:\s*(.*)', out)
     ch = re.search(r'CHANNELS:\s*(.*)', out)
@@ -308,7 +318,8 @@ def t_compress_codec(env, codec, label=None):
                 caps[int(m.group(2))] = ['GET_CAPS error %s' % e]
     label = label or codec
     if not caps:
-        return 'fail', '%s: card %s has no compress offload device' % (label, a.info['id'])
+        raise Missing('%s: card %s has no compress offload device' % (label, a.info['id']),
+                      hw='compress-offload')
     desc = '; '.join('comprC%dD%d: %s' % (a.card, dv, ' '.join(c)) for dv, c in caps.items())
     if not any(codec in c for c in caps.values()):
         return 'fail', '%s is not among the offload codecs advertised (%s)' % (label, desc)
@@ -325,7 +336,8 @@ def t_ucm(env):
     rc, out = sh('alsaucm -c hw:%d list _verbs 2>&1' % a.card, timeout=20)
     verbs = re.findall(r'^\s*\d+:\s*(\S+)', out, re.M)
     if rc or not verbs:
-        return 'fail', 'no UCM configuration for card %s: %s' % (a.info['id'], out.strip()[-200:])
+        raise Missing('no UCM configuration for card %s: %s' % (a.info['id'], out.strip()[-200:]),
+                      hw='ucm')
     rc, dv = sh('alsaucm -c hw:%d set _verb %s list _devices 2>&1' % (a.card, verbs[0]), timeout=20)
     devs = re.findall(r'^\s*\d+:\s*(\S+)', dv, re.M)
     return ('pass' if devs else 'partial', 'UCM verbs %s; devices of %s: %s' % (
@@ -336,9 +348,11 @@ def t_ucm(env):
 def t_pipewire(env):
     """PipeWire: the sound server runs and exposes audio sinks and sources"""
     if not have('pw-cli'):
-        return 'fail', 'PipeWire (pw-cli) not on the image'
+        raise Missing('PipeWire (pw-cli) not on the image', hw='pipewire')
     e = 'PIPEWIRE_RUNTIME_DIR=%s' % env.cfg('audio', 'pipewire_runtime', default='/run/pipewire')
     rc, out = sh('%s pw-cli ls Node 2>&1' % e, timeout=20)
+    if rc and 'connect' in out.lower():
+        raise Missing('no PipeWire daemon to connect to: %s' % out.strip()[-120:], hw='pipewire')
     sinks = len(re.findall(r'media.class = "Audio/Sink"', out))
     srcs = len(re.findall(r'media.class = "Audio/Source"', out))
     if rc:
@@ -474,7 +488,7 @@ def t_concurrent_play(env):
     a = A(env)
     freq, min_db = a.need_loop()
     p2 = a.cfg.get('play2') or {}
-    d1 = a.find('p', p2.get('pcm')) if p2.get('pcm') else None
+    d1 = a.find('p', p2) if p2 else None
     if d1 is None:
         raise Missing('no second playback front end in the board profile (audio.play2)',
                       hw='audio-play2')
@@ -726,6 +740,8 @@ def t_switch_latency(env):
     """Route switch latency: output route enabled while streaming until the tone is heard"""
     a = A(env)
     freq, min_db = a.need_loop()
+    if not a.cfg.get('mute'):
+        raise Missing('no mute and unmute route in the board profile (audio.mute)', hw='audio-mute')
     src = tone(a.f('sw.raw'), freq, 4)
     mixer(a.card, a.cfg.get('mute'))
     s = Stream(a, 6)
