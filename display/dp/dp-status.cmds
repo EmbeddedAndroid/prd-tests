@@ -1,0 +1,9 @@
+# dp-status.cmds: DisplayPort connector, EDID, mode and Type-C state, one
+# command per line (display/dp/mk-cmds-job.py runs each as a LAVA step).
+cat /etc/qcdfp; uname -r
+ls -l /sys/class/drm/
+for c in /sys/class/drm/card*-DP-*; do echo "== $c status=$(cat $c/status) enabled=$(cat $c/enabled) dpms=$(cat $c/dpms 2>/dev/null)"; echo "modes: $(tr '\n' ' ' < $c/modes)"; s=$(wc -c < $c/edid); echo "edid bytes: $s"; [ "$s" -gt 0 ] && od -A x -t x1 -N 32 $c/edid; done
+for c in /sys/class/drm/card*-DP-*; do [ "$(wc -c < $c/edid)" -ge 16 ] && python3 -c "import sys;e=open(sys.argv[1],'rb').read();m=((e[8]<<8)|e[9]);print('EDID mfg %c%c%c product 0x%04x' % (((m>>10)&31)+64,((m>>5)&31)+64,(m&31)+64,e[10]|(e[11]<<8)))" $c/edid; done; echo edid-done
+modetest -D /dev/dri/card0 -c 2>&1 | head -n 30
+cat /sys/kernel/debug/usb/*/typec* 2>/dev/null | head; for p in /sys/class/typec/port*; do echo "$p data_role=$(cat $p/data_role 2>/dev/null) power_role=$(cat $p/power_role 2>/dev/null)"; ls $p 2>/dev/null | grep -E 'partner|port.\.' ; done
+dmesg | grep -iE 'hpd|hot.?plug|msm_dp|displayport|altmode|pmic_glink' | tail -n 25
