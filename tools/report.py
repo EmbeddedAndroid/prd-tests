@@ -7,7 +7,9 @@
 Reads each job's public plain log, takes the "PRD <ID> <status>: <reason>"
 lines the runner printed and writes a markdown table on stdout: one row
 per requirement of the product with the status, the reason and a link
-to the exact log line (#L anchor = 0-based log entry). A requirement
+to the exact log line (#L anchor = 0-based log entry; a reason that
+went on over several console lines is joined and linked at its first
+line). A requirement
 missing from every job is listed as "not run". With several jobs a
 requirement's row cites every job that ran it. Needs python3 with PyYAML."""
 import argparse
@@ -20,6 +22,8 @@ import yaml
 
 TOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LINE = re.compile(r'PRD ([A-Z]+-\d+) (pass|partial|fail|skip): (.*?)(?: \[(.*)\])? \([\d.]+ s\)$')
+START = re.compile(r'PRD [A-Z]+-\d+ (pass|partial|fail|skip): ')
+END = re.compile(r'\([\d.]+ s\)$')
 
 
 def entries(text):
@@ -48,18 +52,37 @@ def main():
     for j in a.jobs:
         url = '%s/scheduler/job/%s/log_file/plain' % (a.lava.rstrip('/'), j)
         text = urllib.request.urlopen(url, timeout=120).read().decode('utf-8', 'replace')
-        board = '?'
-        for i, msg in entries(text):
-            m = re.search(r'PRD BOARD (\S+) PRODUCT \S+ REV (\S+)', msg)
-            if m:
-                board = m.group(1)
-                meta.append('[%s](%s/scheduler/job/%s#L%d): board %s, tests %s' % (
-                    j, a.lava.rstrip('/'), j, i, m.group(1), m.group(2)))
+
+        def take(i, msg):
             m = LINE.search(msg)
             if m:
                 res.setdefault(m.group(1), []).append(
                     (m.group(2), m.group(3), '%s/scheduler/job/%s#L%d' % (a.lava.rstrip('/'), j, i),
-                     board))
+                     meta_board[0]))
+        meta_board = ['?']
+        pend = None     # a PRD line whose reason went on over console lines
+        for i, msg in entries(text):
+            if pend and (START.match(msg) or msg.startswith('=== ')):
+                # never terminated: keep what was printed, end at the next result
+                take(pend[0], pend[1] + ' (0.0 s)')
+                pend = None
+            if pend:
+                pend = (pend[0], pend[1] + ' | ' + msg.strip())
+                if not END.search(msg):
+                    continue
+                i, msg = pend
+                pend = None
+            elif START.match(msg) and not LINE.search(msg):
+                pend = (i, msg)
+                continue
+            m = re.search(r'PRD BOARD (\S+) PRODUCT \S+ REV (\S+)', msg)
+            if m:
+                meta_board[0] = m.group(1)
+                meta.append('[%s](%s/scheduler/job/%s#L%d): board %s, tests %s' % (
+                    j, a.lava.rstrip('/'), j, i, m.group(1), m.group(2)))
+            take(i, msg)
+        if pend:
+            take(pend[0], pend[1] + ' (0.0 s)')
     out = ['Jobs: ' + '; '.join(meta), '']
     counts = {}
     out.append('| ID | requirement | result | reason | log |')
