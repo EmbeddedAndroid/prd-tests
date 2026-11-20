@@ -18,15 +18,16 @@ TOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BANNED = [
     # boards, SoCs and product names
     r'\b(eliza|lemans|monaco|kodiak|glymur|hamoa|purwa|kaanapali|lanai|pakala|seca|nord|shikra|mahua)\b',
-    r'\b(qcs|qcm|qrb|sm|sc|sa|sdm|msm|apq|ipq)[0-9]{3,4}[a-z]*\b',
+    r'\b(qcs|qcm|qrb|sm|sc|sa|sdm|msm|apq|ipq)[0-9]{3,4}[a-z]*\b|\bx1[ep][0-9]{5}\b|\bpm[0-9]{4}\b',
     r'\brb[1-9]\b|rb3gen2|ventuno|\biq-?[0-9]{4}\b|\bcqs\b|\bevk\b',
     # sound card, codec, DSP instance and vendor driver names
     r'\bwsa[0-9]*\b|\bwcd[0-9]*\b|\blpass\b|\bq6[a-z]*\b|\b[acsm]dsp[0-9]*\b|snd-sc|sc8280xp',
+    r'\brt[0-9]{4}\b|\b[rtv]x_macro\b|\bhw:[0-9]',
     r'\bmultimedia[0-9]+\b|\bva_dmic|\bwsa_|\bdmic[0-9]+\b',
     # camera sensors
-    r'\bimx[0-9]{3}\b|\bov[0-9]{4}\b',
+    r'\bimx[0-9]{3}\b|\bov[0-9]{4}\b|\bov[0-9]{2}[a-z][0-9]{2}\b|\bs5k',
     # connector instances, GPIOs, register addresses
-    r'\b(HDMI-[AB]|DP|eDP|DSI|DPI|VGA|DVI-[IDA])-[0-9]+\b',
+    r'\b(HDMI-[AB]|DP|eDP|DSI|DPI|VGA|DVI-[IDA]|Virtual|Writeback|LVDS|Unknown)-[0-9]+\b',
     r'\bgpio[0-9]+\b|\bGPIO[0-9]+\b',
     r'\b0x(?!f+\b)(?!ff000000\b)[0-9a-fA-F]{6,}\b',
 ]

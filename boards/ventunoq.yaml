@@ -1,6 +1,6 @@
 # Arduino VENTUNO Q (Monaco) on the qcom-deb-images Debian trixie eMMC
 # image (stock firmware). The image asks for a new password at the first
-# login; the profile answers it the way the image's CI jobs do.
+# login: the old one is ROOT_PW, the new one NEW_PW from the environment.
 name: ventunoq
 
 lava:
@@ -12,7 +12,7 @@ lava:
   rawprogram: [rawprogram0.xml]
   patch: [patch0.xml]
   username: debian
-  login_first: [debian, new password, new password, sudo su]
+  login_first: ['{ROOT_PW}', '{NEW_PW}', '{NEW_PW}', sudo su]
   prompts: [debian@debian, Current password, New password, Retype new password]
   prompt: 'root@debian'
   firmware_fingerprint: false

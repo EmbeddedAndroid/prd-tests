@@ -79,7 +79,8 @@ def login(lv, reset=True):
     b = {'method': 'minimal',
          'auto_login': {'login_prompt': 'login:', 'username': lv.get('username', 'root'),
                         'password_prompt': 'Password', 'password': env('ROOT_PW'),
-                        'login_commands': lv.get('login_first', []) + ['dmesg -n 1'] +
+                        'login_commands': [x.format(**os.environ) for x in lv.get('login_first', [])] +
+                        ['dmesg -n 1'] +
                         lv.get('login_commands', [])},
          'prompts': lv.get('prompts', []) + [lv['prompt'], 'root@(.*):[/~]#'],
          'timeout': {'minutes': 10}}
@@ -179,7 +180,7 @@ def main():
               'metadata': {'purpose': 'stock restore backstop after %s' % a.tag},
               'actions': [{'deploy': {'to': 'qdl', 'qcomflash': {'url': env('STOCK_IMAGE_URL')},
                                       'timeout': {'minutes': 30}}},
-                          qdl_boot(flash_steps(lv)[-1], env('STOCK_IMAGE_DIR'), 20),
+                          ] + [qdl_boot(st, env('STOCK_IMAGE_DIR'), 20) for st in flash_steps(lv)] + [
                           {'boot': {'method': 'minimal', 'timeout': {'minutes': 3}}},
                           {'test': {'timeout': {'minutes': 10}, 'monitors': [{
                               'name': 'stock-restore', 'start': 'SBL1, End', 'end': 'UEFI Total',
