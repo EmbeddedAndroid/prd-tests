@@ -48,7 +48,7 @@ class Video:
         if not cs:
             have_ = sorted(set(f for c in self.codecs if c['role'] == role for f in c['coded']))
             raise Missing('no V4L2 %s takes %s (%s formats: %s)' % (
-                role, codec, role, ' '.join(have_) or 'none'), hw='video-%s' % role)
+                role, codec, role, ' '.join(have_) or 'none'), hw='video-%s-%s' % (role, codec))
         return cs[0]
 
     def element(self, role, codec):
@@ -59,7 +59,7 @@ class Video:
         cand = [e for e in self.elems if e.endswith(suf) and e.startswith('v4l2')]
         if not cand:
             raise Missing('no GStreamer v4l2 element for %s %s (v4l2 elements: %s)' % (
-                codec, role, ' '.join(self.elems) or 'none'), hw='video-%s' % role)
+                codec, role, ' '.join(self.elems) or 'none'), hw='gst-v4l2-%s-%s' % (role, codec))
         return sorted(cand, key=len)[0]
 
 
@@ -208,8 +208,8 @@ def vec_pipeline(path, codec, dec):
 def t_decode_vector(env, codec, vector, expect_format=None):
     """Conformance vector decoded by the V4L2 decoder: every frame, in the expected format"""
     v = V(env)
-    dec = v.element('decoder', codec)
     v.find('decoder', codec)
+    dec = v.element('decoder', codec)
     d = os.path.join(TOP, 'vectors')
     path = os.path.join(d, vector)
     if not os.path.exists(path):
@@ -301,3 +301,70 @@ def t_hls_local(env, codec='H264', seconds=3):
     return ('pass' if rc == 0 and got == n else 'fail', '%d HLS segments; %d of %d frames '
             'decoded over HTTP%s' % (segs, got, n, '' if rc == 0 else '; rc %d: %s' % (rc, gst_err(txt))),
             {'frames': got})
+
+
+def yuv420_frames(w, h, n):
+    """n frames of a moving gradient in planar YUV 4:2:0 (YU12 layout)."""
+    out = []
+    for k in range(n):
+        y = bytes(((x + 4 * k) * 255 // w) & 0xff for x in range(w)) * h
+        u = bytes([(64 + 2 * k) & 0xff]) * (w * h // 4)
+        v = bytes([(192 - 2 * k) & 0xff]) * (w * h // 4)
+        out.append(y + u + v)
+    return out
+
+
+def nv12_from_yu12(f, w, h):
+    y, u, v = f[:w * h], f[w * h:w * h * 5 // 4], f[w * h * 5 // 4:]
+    return y + bytes(b for pair in zip(u, v) for b in pair)
+
+
+@test('video.v4l2ctl_roundtrip')
+def t_v4l2ctl_roundtrip(env, codec=None, width=640, height=480, count=10, max_diff=12):
+    """Encode and decode through the V4L2 codecs with v4l2-ctl, compared frame by frame"""
+    v = V(env)
+    if not have('v4l2-ctl'):
+        return 'fail', 'v4l2-ctl not on the image'
+    encs = [c for c in v.codecs if c['role'] == 'encoder']
+    decs = [c for c in v.codecs if c['role'] == 'decoder']
+    pairs = [(e, d, f) for e in encs for d in decs for f in e['coded'] if f in d['coded'] and
+             (codec is None or f == codec)]
+    if not pairs:
+        raise Missing('no stateful V4L2 encoder and decoder share a coded format%s' % (
+            ' %s' % codec if codec else ''), hw='video-encoder')
+    e, d, f = pairs[0]
+    raw = next((r for r in ('YU12', 'NV12') if r in e['raw'] and r in d['raw']), None)
+    if raw is None:
+        return 'fail', 'no YU12 or NV12 on both the encoder input %s and decoder output %s' % (
+            e['raw'], d['raw'])
+    src = yuv420_frames(width, height, count)
+    if raw == 'NV12':
+        src = [nv12_from_yu12(x, width, height) for x in src]
+    fin, fenc, fout = (os.path.join(v.tmp, n) for n in ('in.yuv', 'enc.hdr', 'out.yuv'))
+    with open(fin, 'wb') as fh:
+        fh.write(b''.join(src))
+    rc, log = sh('timeout 60 v4l2-ctl -d %s --set-fmt-video-out=width=%d,height=%d,pixelformat=%s '
+                 '--set-fmt-video=pixelformat=%s --stream-out-mmap --stream-mmap --stream-from=%s '
+                 '--stream-to-hdr=%s --stream-count=%d 2>&1' % (e['dev'].path, width, height, raw, f,
+                                                                fin, fenc, count), timeout=70)
+    size = os.path.getsize(fenc) if os.path.exists(fenc) else 0
+    if rc or not size:
+        return 'fail', 'encode %s on %s rc %d, %d bytes: %s' % (f, e['dev'].path, rc, size,
+                                                                log.strip()[-200:])
+    rc, log = sh('timeout 60 v4l2-ctl -d %s --set-fmt-video-out=pixelformat=%s --set-fmt-video='
+                 'pixelformat=%s --stream-out-mmap --stream-mmap --stream-from-hdr=%s --stream-to=%s '
+                 '2>&1' % (d['dev'].path, f, raw, fenc, fout), timeout=70)
+    data = open(fout, 'rb').read() if os.path.exists(fout) else b''
+    fs = width * height * 3 // 2
+    n = len(data) // fs
+    meas = {'frames': n, 'bytes': size}
+    if rc or n < count:
+        return ('fail', 'decode %s on %s rc %d: %d of %d frames: %s' % (
+            f, d['dev'].path, rc, n, count, log.strip()[-200:]), meas)
+    diffs = [sum(abs(a - b) for a, b in zip(src[i][:width * height:97], data[i * fs:i * fs + width * height:97]))
+             / len(src[i][:width * height:97]) for i in range(count)]
+    meas['luma_diff'] = round(max(diffs), 1)
+    return ('pass' if max(diffs) <= max_diff else 'fail',
+            '%s %dx%d %s via %s and %s: %d frames, %d bytes coded, worst mean luma difference %.1f '
+            '(limit %d)' % (f, width, height, raw, e['dev'].card, d['dev'].card, count, size,
+                            max(diffs), max_diff), meas)
