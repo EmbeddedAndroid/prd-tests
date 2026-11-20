@@ -16,7 +16,7 @@ RESULT_FILE="${OUTPUT}/result.txt"
 export RESULT_FILE
 
 # <case>:<remoteproc>:<domain>:<unsigned PD 0|1>
-TESTS="adsp:adsp:0:0 cdsp:cdsp:3:0 cdsp-unsigned-pd:cdsp:3:1"
+TESTS=""
 # <remoteproc>:<device node prefix>
 NODES=""
 

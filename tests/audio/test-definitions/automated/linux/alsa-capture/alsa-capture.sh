@@ -26,7 +26,7 @@ PLAY_PCM=""
 CAPTURE_PCM=""
 PLAY_MIXER=""
 CAPTURE_MIXER=""
-# Names of the capture channels in order, e.g. "dmic0 dmic1 dmic2 dmic3".
+# Names of the capture channels in order, e.g. "mic0 mic1 mic2 mic3".
 MICS="mic0 mic1"
 RATE="48000"
 FREQ="1000"
@@ -34,7 +34,7 @@ TONE_DBFS="-12"
 MIN_DB="10"
 TOLERANCE_HZ="25"
 SECONDS_PER_TONE="3"
-REMOTEPROC="adsp"
+REMOTEPROC=""
 BUSY_SECONDS="10"
 WAIT_SECONDS="60"
 

@@ -12,18 +12,20 @@ metadata:
         - debian
     scope:
         - functional
-    devices:
-        - eliza-evk-emmc
 
 params:
     # ALSA card id or name; empty is the first card.
     CARD: ""
     # Any of: tdm i2s analog-mic i2c dp
     INTERFACES: "tdm i2s analog-mic i2c dp"
+    # Pattern of the analog codec component (empty: ADC controls alone).
+    ANALOG_CODEC: ""
+    # Pattern of I2C audio driver names, for built-in drivers.
+    I2C_DRIVERS: "codec"
     WAIT_SECONDS: "60"
 
 run:
     steps:
         - cd ./automated/linux/audio-interfaces/
-        - ./audio-interfaces.sh -c "${CARD}" -i "${INTERFACES}" -W "${WAIT_SECONDS}"
+        - ./audio-interfaces.sh -c "${CARD}" -i "${INTERFACES}" -a "${ANALOG_CODEC}" -d "${I2C_DRIVERS}" -W "${WAIT_SECONDS}"
         - ../../utils/send-to-lava.sh ./output/result.txt

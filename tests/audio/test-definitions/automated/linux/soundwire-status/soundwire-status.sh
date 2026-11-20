@@ -64,5 +64,5 @@ for d in "${D}"/sdw:*; do
 done
 add_metric "soundwire-buses" "$([ "${masters}" -ge "${MIN_MASTERS}" ] && echo pass || echo fail)" "${masters}" count
 add_metric "soundwire-peripherals" "$([ "${n}" -ge "${MIN_PERIPHERALS}" ] && echo pass || echo fail)" "${n}" count
-dmesg | grep -iE "soundwire|sdw|wsa88" | tail -20
+dmesg | grep -iE "soundwire|sdw" | tail -20
 exit 0

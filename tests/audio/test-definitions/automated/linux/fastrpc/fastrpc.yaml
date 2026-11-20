@@ -17,13 +17,10 @@ metadata:
         - buildroot
     scope:
         - functional
-    devices:
-        - monaco-arduino-monza
 
 params:
     # Space separated <case>:<remoteproc>:<domain>:<unsigned PD 0|1>.
-    # FastRPC domains: 0 ADSP, 1 MDSP, 2 SDSP, 3 CDSP, 4 CDSP1.
-    TESTS: "adsp:adsp:0:0 cdsp:cdsp:3:0 cdsp-unsigned-pd:cdsp:3:1"
+    TESTS: ""
     # Space separated <remoteproc>:<device node prefix>, e.g.
     # gpdsp0:/dev/fastrpc-gdsp0
     NODES: ""

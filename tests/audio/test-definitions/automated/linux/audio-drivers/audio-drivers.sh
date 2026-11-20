@@ -19,9 +19,9 @@ export RESULT_FILE
 
 CARD=""
 CARD_DRIVER=""
-REMOTEPROC="adsp"
+REMOTEPROC=""
 # extra module name patterns that count as audio (ERE)
-AUDIO_MODULES="^snd|^q6|apr|gpr|audioreach|soundwire|wsa|wcd|lpass|^agm|^pal"
+AUDIO_MODULES="^snd"
 WAIT_SECONDS="60"
 
 while getopts "c:D:r:a:W:h" o; do
@@ -92,6 +92,11 @@ r=""
 for d in /sys/class/remoteproc/remoteproc*; do
     [ "$(cat "${d}/name" 2>/dev/null)" = "${REMOTEPROC}" ] && r="$(cat "${d}/state")"
 done
-info_msg "remoteproc ${REMOTEPROC}: ${r:-absent}"
-if [ "${r}" = running ]; then report_pass audio-dsp-running; else report_fail audio-dsp-running; fi
+if [ -z "${REMOTEPROC}" ]; then
+    info_msg "no audio DSP remoteproc named (-r)"
+    report_skip audio-dsp-running
+else
+    info_msg "remoteproc ${REMOTEPROC}: ${r:-absent}"
+    if [ "${r}" = running ]; then report_pass audio-dsp-running; else report_fail audio-dsp-running; fi
+fi
 exit 0

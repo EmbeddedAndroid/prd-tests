@@ -10,8 +10,6 @@ metadata:
         - debian
     scope:
         - functional
-    devices:
-        - eliza-evk-emmc
 
 params:
     MIN_MASTERS: "1"

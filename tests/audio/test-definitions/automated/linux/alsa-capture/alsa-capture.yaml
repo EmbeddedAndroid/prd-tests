@@ -16,8 +16,6 @@ metadata:
         - buildroot
     scope:
         - functional
-    devices:
-        - eliza-evk-emmc
 
 params:
     # alsa: aplay/arecord on the PCMs; pipewire: pw-play/pw-record on the
@@ -36,7 +34,7 @@ params:
     MIN_DB: "10"
     TOLERANCE_HZ: "25"
     SECONDS_PER_TONE: "3"
-    REMOTEPROC: "adsp"
+    REMOTEPROC: ""
     BUSY_SECONDS: "10"
     WAIT_SECONDS: "60"
 

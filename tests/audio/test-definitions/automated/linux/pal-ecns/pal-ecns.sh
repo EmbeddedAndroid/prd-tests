@@ -25,9 +25,9 @@ OUTPUT="$(pwd)/output"
 RESULT_FILE="${OUTPUT}/result.txt"
 export RESULT_FILE
 
-PLAY_NODE="pal_sink_speaker_ll"
-PROC_NODE="pal_source_speaker_mic"
-RAW_NODE="pal_source_speaker_mic_raw"
+PLAY_NODE=""
+PROC_NODE=""
+RAW_NODE=""
 PLAY_CHANNEL="2"
 RATE="48000"
 FREQ="1250"

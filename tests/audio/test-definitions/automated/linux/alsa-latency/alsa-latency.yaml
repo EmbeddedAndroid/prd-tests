@@ -14,8 +14,6 @@ metadata:
     scope:
         - functional
         - performance
-    devices:
-        - eliza-evk-emmc
 
 params:
     CARD: ""

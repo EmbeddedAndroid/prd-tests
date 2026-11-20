@@ -12,8 +12,6 @@ metadata:
         - debian
     scope:
         - functional
-    devices:
-        - eliza-evk-emmc
 
 params:
     # alsa: amixer controls; pipewire: PLAY_PCM/CAPTURE_PCM are PipeWire

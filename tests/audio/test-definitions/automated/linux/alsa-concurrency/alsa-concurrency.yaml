@@ -11,8 +11,6 @@ metadata:
         - debian
     scope:
         - functional
-    devices:
-        - eliza-evk-emmc
 
 params:
     # alsa or pipewire (PLAY_A, PLAY_B, CAPTURE_PCM are then node names).

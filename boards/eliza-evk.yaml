@@ -56,16 +56,25 @@ audio:
     CAPTURE_MIXER: *mic01
     TONE_DBFS: -6
     FREQ: 1600
+  # codec and I2C driver names of this board for audio-interfaces
+  ifc_common: &ifc
+    CARD: eliza-cqs-evk
+    ANALOG_CODEC: wcd
+    I2C_DRIVERS: codec|wcd|wsa|tas|cs35|max98|rt5|aw88
   cases:
     soundwire: {dir: soundwire-status, params: {MIN_MASTERS: 1, MIN_PERIPHERALS: 2}}
-    interface-tdm: {dir: audio-interfaces, params: {CARD: eliza-cqs-evk, INTERFACES: tdm}}
-    interface-i2s: {dir: audio-interfaces, params: {CARD: eliza-cqs-evk, INTERFACES: i2s}}
-    interface-analog-mic: {dir: audio-interfaces, params: {CARD: eliza-cqs-evk, INTERFACES: analog-mic}}
-    interface-i2c: {dir: audio-interfaces, params: {CARD: eliza-cqs-evk, INTERFACES: i2c}}
-    interface-dp: {dir: audio-interfaces, params: {CARD: eliza-cqs-evk, INTERFACES: dp}}
+    interface-tdm: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: tdm}}
+    interface-i2s: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: i2s}}
+    interface-analog-mic: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: analog-mic}}
+    interface-i2c: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: i2c}}
+    interface-dp: {dir: audio-interfaces, params: {<<: *ifc, INTERFACES: dp}}
     drivers:
       dir: audio-drivers
-      params: {CARD: eliza-cqs-evk, CARD_DRIVER: snd-sc8280xp, REMOTEPROC: adsp}
+      params:
+        CARD: eliza-cqs-evk
+        CARD_DRIVER: snd-sc8280xp
+        REMOTEPROC: adsp
+        AUDIO_MODULES: ^snd|^q6|apr|gpr|audioreach|soundwire|wsa|wcd|lpass|^agm|^pal
     loopback:
       dir: alsa-loopback
       params:

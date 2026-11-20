@@ -16,8 +16,6 @@ metadata:
         - buildroot
     scope:
         - functional
-    devices:
-        - eliza-evk-emmc
 
 params:
     CARD: ""

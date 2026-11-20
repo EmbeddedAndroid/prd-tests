@@ -3,11 +3,12 @@
 # Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 #
 # Audio interfaces the board must expose, checked on the running card:
-#   tdm, i2s     a card DAI link on an LPASS TDM or MI2S port (DT link-name
-#                or the card's runtime links in debugfs), with its PCM
-#   analog-mic   an analog codec (WCD) component on the card and an ADC
-#                route for its microphones
-#   i2c          an audio device on I2C bound to a sound driver
+#   tdm, i2s     a card DAI link on a TDM or I2S port (DT link-name or
+#                the card's runtime links in debugfs), with its PCM
+#   analog-mic   ADC or analog mic controls on the card, and a codec
+#                component matching ANALOG_CODEC when that is given
+#   i2c          an audio device on I2C bound to a driver from sound/ or
+#                one whose name matches I2C_DRIVERS
 #   dp           a card DAI link on a DisplayPort audio port
 # Each interface named in INTERFACES gets one case; a missing interface
 # fails with what was looked for, so the report shows the gap. Without a
@@ -23,14 +24,18 @@ export RESULT_FILE
 
 CARD=""
 INTERFACES="tdm i2s analog-mic i2c dp"
+ANALOG_CODEC=""
+I2C_DRIVERS="codec"
 WAIT_SECONDS="60"
 
-while getopts "c:i:W:h" o; do
+while getopts "c:i:a:d:W:h" o; do
     case "$o" in
         c) CARD="${OPTARG}" ;;
         i) INTERFACES="${OPTARG}" ;;
+        a) ANALOG_CODEC="${OPTARG}" ;;
+        d) I2C_DRIVERS="${OPTARG}" ;;
         W) WAIT_SECONDS="${OPTARG}" ;;
-        *) echo "Usage: $0 [-c <card>] [-i '<tdm i2s analog-mic i2c dp>'] [-W <s>]" 1>&2; exit 1 ;;
+        *) echo "Usage: $0 [-c <card>] [-i '<tdm i2s analog-mic i2c dp>'] [-a <codec pattern>] [-d <i2c driver pattern>] [-W <s>]" 1>&2; exit 1 ;;
     esac
 done
 
@@ -66,7 +71,8 @@ for f in ${INTERFACES}; do
         i2s) check_link i2s "MI2S|I2S" ;;
         dp) check_link dp "DISPLAY_PORT|DP[0-9]*_RX|HDMI" ;;
         analog-mic)
-            w="$(echo "${comps}" | grep -iE 'wcd' | head -3)"
+            w="any"
+            [ -n "${ANALOG_CODEC}" ] && w="$(echo "${comps}" | grep -iE "${ANALOG_CODEC}" | head -3)"
             a="$([ -n "${C}" ] && amixer -c "${C}" controls 2>/dev/null | grep -iE "'(ADC[0-9]|TX DEC|AMIC)" | head -5)"
             info_msg "analog-mic: codec '${w}', ADC controls '${a}'"
             if [ -n "${w}" ] && [ -n "${a}" ]; then report_pass interface-analog-mic; else report_fail interface-analog-mic; fi ;;
@@ -78,9 +84,9 @@ for f in ${INTERFACES}; do
                 p=""
                 [ -e "${d}/driver/module" ] && p="$(modinfo -n "$(basename "$(readlink "${d}/driver/module")")" 2>/dev/null)"
                 # built-in drivers have no module: judge them by name
-                case "${p}:${drv}" in
-                    */sound/*:*|:*codec*|:*wcd*|:*wsa*|:*tas*|:*cs35*|:*max98*|:*rt5*|:*aw88*) hit="${hit} $(basename "${d}"):${drv}" ;;
-                esac
+                if echo "${p}" | grep -q '/sound/' || echo "${drv}" | grep -qiE "${I2C_DRIVERS}"; then
+                    hit="${hit} $(basename "${d}"):${drv}"
+                fi
             done
             info_msg "i2c audio devices:${hit:- none}"
             if [ -n "${hit}" ]; then report_pass interface-i2c; else report_fail interface-i2c; fi ;;

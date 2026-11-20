@@ -11,15 +11,15 @@ metadata:
         - debian
     scope:
         - functional
-    devices:
-        - eliza-evk-emmc
 
 params:
     CARD: ""
-    # Platform driver name of the upstream machine driver, e.g. snd-sc8280xp.
+    # Platform driver name of the upstream machine driver.
     CARD_DRIVER: ""
-    REMOTEPROC: "adsp"
-    AUDIO_MODULES: "^snd|^q6|apr|gpr|audioreach|soundwire|wsa|wcd|lpass|^agm|^pal"
+    # remoteproc name of the audio DSP (empty: no DSP check).
+    REMOTEPROC: ""
+    # Pattern of the module names that make up the audio stack.
+    AUDIO_MODULES: "^snd"
     WAIT_SECONDS: "60"
 
 run:
