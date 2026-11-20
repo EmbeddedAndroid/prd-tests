@@ -1,0 +1,53 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: alsa-formats
+    description: "Sample rates, formats and channel counts at the signal level:
+      every rate x format x channel count is either supported natively by
+      the hw: PCM and then carries a sine at the right frequency, or is
+      refused (combinations listed as native must be supported); through
+      plughw every combination must carry the sine. Two playback PCMs mixed
+      into one output play two sines at once and both must be found."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - debian
+        - ubuntu
+        - fedora
+        - openembedded
+        - buildroot
+    scope:
+        - functional
+    devices:
+        - eliza-evk-emmc
+
+params:
+    CARD: ""
+    PLAY_PCM: ""
+    # Second playback PCM for the concurrency case; empty skips it.
+    PLAY_PCM2: ""
+    CAPTURE_PCM: ""
+    PLAY_MIXER: ""
+    # Mixer settings that add the second PCM to the output.
+    PLAY_MIXER2: ""
+    CAPTURE_MIXER: ""
+    CAPTURE_CHANNELS: "2"
+    RATES: "8000 16000 44100 48000 96000"
+    FORMATS: "S16_LE S24_LE"
+    CHANNELS: "1 2"
+    CAPTURE_RATES: "8000 16000 48000"
+    # <rate>:<format>:<channels> the hw: PCMs must support natively.
+    NATIVE_PLAYBACK: "48000:S16_LE:2"
+    NATIVE_CAPTURE: "48000:S16_LE:2"
+    FREQ: "1000"
+    FREQ2: "2500"
+    TONE_DBFS: "-6"
+    MIN_DB: "15"
+    TOLERANCE_HZ: "25"
+    SECONDS_PER_TONE: "2"
+    WAIT_SECONDS: "60"
+
+run:
+    steps:
+        - cd ./automated/linux/alsa-formats/
+        - ./alsa-formats.sh -c "${CARD}" -p "${PLAY_PCM}" -o "${PLAY_PCM2}" -q "${CAPTURE_PCM}" -m "${PLAY_MIXER}" -k "${PLAY_MIXER2}" -n "${CAPTURE_MIXER}" -C "${CAPTURE_CHANNELS}" -r "${RATES}" -F "${FORMATS}" -H "${CHANNELS}" -x "${CAPTURE_RATES}" -N "${NATIVE_PLAYBACK}" -M "${NATIVE_CAPTURE}" -f "${FREQ}" -g "${FREQ2}" -l "${TONE_DBFS}" -d "${MIN_DB}" -t "${TOLERANCE_HZ}" -T "${SECONDS_PER_TONE}" -W "${WAIT_SECONDS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt

@@ -1,0 +1,18 @@
+{
+ "_note": "definitions whose cases passed on both EVKs in the final runs (base LAVA 589422 + 589537, overlay 590568 + 590676); the regression job runs these, in suite order",
+ "base": [
+  "audio-drivers",
+  "alsa-loopback",
+  "alsa-capture-dmic23",
+  "alsa-capture-dmic67",
+  "alsa-volume",
+  "alsa-device-switch",
+  "alsa-upmix",
+  "alsa-compress"
+ ],
+ "ovl": [
+  "alsa-loopback-pal",
+  "alsa-loopback-pal-db",
+  "alsa-capture-pal"
+ ]
+}

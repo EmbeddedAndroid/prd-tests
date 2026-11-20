@@ -1,0 +1,29 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: audio-interfaces
+    description: "Audio interfaces on the running card: TDM and MI2S DAI links,
+      an analog codec with ADC routes for analog microphones, and audio
+      devices on I2C bound to sound drivers, and DisplayPort audio links. One case per interface; a missing
+      interface fails with what was looked for."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - openembedded
+        - debian
+    scope:
+        - functional
+    devices:
+        - eliza-evk-emmc
+
+params:
+    # ALSA card id or name; empty is the first card.
+    CARD: ""
+    # Any of: tdm i2s analog-mic i2c dp
+    INTERFACES: "tdm i2s analog-mic i2c dp"
+    WAIT_SECONDS: "60"
+
+run:
+    steps:
+        - cd ./automated/linux/audio-interfaces/
+        - ./audio-interfaces.sh -c "${CARD}" -i "${INTERFACES}" -W "${WAIT_SECONDS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt

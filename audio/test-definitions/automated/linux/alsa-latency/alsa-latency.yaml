@@ -1,0 +1,47 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: alsa-latency
+    description: "Low latency streams: playback and capture together at a small
+      period: granted periods at most MAX_PERIOD_MS, no xruns, the tone
+      detected in the capture (a default-period reference run must be
+      detected too) and a muted control not detected; round-trip latency
+      from alsabat when installed."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - openembedded
+        - debian
+    scope:
+        - functional
+        - performance
+    devices:
+        - eliza-evk-emmc
+
+params:
+    CARD: ""
+    PLAY_PCM: ""
+    CAPTURE_PCM: ""
+    PLAY_MIXER: ""
+    CAPTURE_MIXER: ""
+    MUTE_MIXER: ""
+    # Period in frames (240 at 48 kHz is 5 ms) and periods per buffer.
+    PERIOD_FRAMES: "240"
+    BUFFER_PERIODS: "2"
+    # Whole seconds.
+    DURATION: "10"
+    PLAY_CHANNEL: "2"
+    RATE: "48000"
+    FREQ: "1250"
+    TONE_DBFS: "-6"
+    MIN_DB: "20"
+    # Empty: report the round-trip latency only.
+    LATENCY_MAX_MS: ""
+    # Largest period, per direction, that counts as low latency.
+    MAX_PERIOD_MS: "10"
+    WAIT_SECONDS: "60"
+
+run:
+    steps:
+        - cd ./automated/linux/alsa-latency/
+        - ./alsa-latency.sh -c "${CARD}" -p "${PLAY_PCM}" -q "${CAPTURE_PCM}" -m "${PLAY_MIXER}" -n "${CAPTURE_MIXER}" -u "${MUTE_MIXER}" -F "${PERIOD_FRAMES}" -B "${BUFFER_PERIODS}" -S "${DURATION}" -k "${PLAY_CHANNEL}" -R "${RATE}" -f "${FREQ}" -l "${TONE_DBFS}" -d "${MIN_DB}" -L "${LATENCY_MAX_MS}" -P "${MAX_PERIOD_MS}" -W "${WAIT_SECONDS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt

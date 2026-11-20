@@ -1,0 +1,44 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: alsa-compress
+    description: "Compressed offload: an MP3 of a sine (encoded on the target with
+      lame) is played through the compressed device with cplay so the DSP
+      decodes it; it must play in real time, exit 0 and be found in a
+      microphone capture. A muted control must not be detected and a stream
+      of random bytes must end cleanly."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - debian
+        - ubuntu
+        - fedora
+        - openembedded
+        - buildroot
+    scope:
+        - functional
+    devices:
+        - eliza-evk-emmc
+
+params:
+    CARD: ""
+    # Compressed device number; empty is the first.
+    COMPR_DEVICE: ""
+    CAPTURE_PCM: ""
+    # Mixer settings that route the compressed stream to the speakers.
+    PLAY_MIXER: ""
+    CAPTURE_MIXER: ""
+    MUTE_MIXER: ""
+    CAPTURE_CHANNELS: "2"
+    FREQ: "1000"
+    TONE_DBFS: "-12"
+    SECONDS_LONG: "6"
+    BITRATE: "128"
+    MIN_DB: "15"
+    TOLERANCE_HZ: "25"
+    WAIT_SECONDS: "60"
+
+run:
+    steps:
+        - cd ./automated/linux/alsa-compress/
+        - ./alsa-compress.sh -c "${CARD}" -D "${COMPR_DEVICE}" -q "${CAPTURE_PCM}" -m "${PLAY_MIXER}" -n "${CAPTURE_MIXER}" -u "${MUTE_MIXER}" -C "${CAPTURE_CHANNELS}" -f "${FREQ}" -l "${TONE_DBFS}" -s "${SECONDS_LONG}" -b "${BITRATE}" -d "${MIN_DB}" -t "${TOLERANCE_HZ}" -W "${WAIT_SECONDS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt

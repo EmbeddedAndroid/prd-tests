@@ -1,0 +1,42 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: alsa-device-switch
+    description: "Device switch during a running capture stream: the routing
+      moves from device A to a device that does not pick the tone up and then
+      to device B while one stream
+      records a tone from the speaker; the tone must be heard on A and B and
+      not while switched off, and the stream must run to the end."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - openembedded
+        - debian
+    scope:
+        - functional
+    devices:
+        - eliza-evk-emmc
+
+params:
+    CARD: ""
+    PLAY_PCM: ""
+    CAPTURE_PCM: ""
+    PLAY_MIXER: ""
+    # Mixer settings, '<ctl>=<v>;...': first device, a device that does not
+    # pick the tone up, second device.
+    ROUTE_A: ""
+    ROUTE_OFF: ""
+    ROUTE_B: ""
+    PLAY_CHANNEL: "2"
+    RATE: "48000"
+    FREQ: "1250"
+    TONE_DBFS: "-6"
+    MIN_DB: "20"
+    # Whole seconds per routing segment.
+    SEGMENT: "3"
+    WAIT_SECONDS: "60"
+
+run:
+    steps:
+        - cd ./automated/linux/alsa-device-switch/
+        - ./alsa-device-switch.sh -c "${CARD}" -p "${PLAY_PCM}" -q "${CAPTURE_PCM}" -m "${PLAY_MIXER}" -a "${ROUTE_A}" -o "${ROUTE_OFF}" -b "${ROUTE_B}" -k "${PLAY_CHANNEL}" -R "${RATE}" -f "${FREQ}" -l "${TONE_DBFS}" -d "${MIN_DB}" -S "${SEGMENT}" -W "${WAIT_SECONDS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt

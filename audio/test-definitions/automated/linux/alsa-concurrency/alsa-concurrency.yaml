@@ -1,0 +1,41 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: alsa-concurrency
+    description: "Simultaneous streams: two playback streams at different
+      frequencies to the speaker, alone and together, recorded on the
+      microphones; together, both frequencies must be detected."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - openembedded
+        - debian
+    scope:
+        - functional
+    devices:
+        - eliza-evk-emmc
+
+params:
+    # alsa or pipewire (PLAY_A, PLAY_B, CAPTURE_PCM are then node names).
+    AUDIO_BACKEND: "alsa"
+    CARD: ""
+    PLAY_A: ""
+    PLAY_B: ""
+    CAPTURE_PCM: ""
+    # Mixer settings routing both playback PCMs to the speaker.
+    PLAY_MIXER: ""
+    CAPTURE_MIXER: ""
+    PLAY_CHANNEL: "2"
+    RATE: "48000"
+    FREQ_A: "1250"
+    FREQ_B: "2000"
+    TONE_DBFS: "-9"
+    MIN_DB: "20"
+    # Whole seconds.
+    SECONDS_PER_TONE: "4"
+    WAIT_SECONDS: "60"
+
+run:
+    steps:
+        - cd ./automated/linux/alsa-concurrency/
+        - AUDIO_BACKEND="${AUDIO_BACKEND}" ./alsa-concurrency.sh -c "${CARD}" -a "${PLAY_A}" -b "${PLAY_B}" -q "${CAPTURE_PCM}" -m "${PLAY_MIXER}" -n "${CAPTURE_MIXER}" -k "${PLAY_CHANNEL}" -R "${RATE}" -f "${FREQ_A}" -g "${FREQ_B}" -l "${TONE_DBFS}" -d "${MIN_DB}" -T "${SECONDS_PER_TONE}" -W "${WAIT_SECONDS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt

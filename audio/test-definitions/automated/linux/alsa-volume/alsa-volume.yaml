@@ -1,0 +1,51 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: alsa-volume
+    description: "Volume control at the signal level: the speaker plays a sine
+      at each value of the volume controls while the microphones record; each
+      step must move the level by the expected dB within a tolerance and a
+      muted control run must not be detected."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - openembedded
+        - debian
+    scope:
+        - functional
+    devices:
+        - eliza-evk-emmc
+
+params:
+    # alsa: amixer controls; pipewire: PLAY_PCM/CAPTURE_PCM are PipeWire
+    # nodes and VOLUMES are dB on the playback node.
+    AUDIO_BACKEND: "alsa"
+    CARD: ""
+    PLAY_PCM: ""
+    CAPTURE_PCM: ""
+    PLAY_MIXER: ""
+    CAPTURE_MIXER: ""
+    # Volume controls set to each value, separated by ';'.
+    VOLUME_CTLS: ""
+    # Values to step through, loudest first (pipewire: whole dB at or below 0,
+    # e.g. "0 -1 -10 -20").
+    VOLUMES: "81 71 61"
+    # Value that must silence the output (pipewire: the node is muted).
+    MUTE_VALUE: "0"
+    # Expected dB per control unit.
+    STEP_DB: "1"
+    TOL_DB: "4"
+    # 1-based playback channel carrying the tone.
+    PLAY_CHANNEL: "2"
+    RATE: "48000"
+    FREQ: "1250"
+    TONE_DBFS: "-6"
+    MIN_DB: "20"
+    # Whole seconds.
+    SECONDS_PER_TONE: "2"
+    WAIT_SECONDS: "60"
+
+run:
+    steps:
+        - cd ./automated/linux/alsa-volume/
+        - AUDIO_BACKEND="${AUDIO_BACKEND}" ./alsa-volume.sh -c "${CARD}" -p "${PLAY_PCM}" -q "${CAPTURE_PCM}" -m "${PLAY_MIXER}" -n "${CAPTURE_MIXER}" -v "${VOLUME_CTLS}" -V "${VOLUMES}" -z "${MUTE_VALUE}" -s "${STEP_DB}" -e "${TOL_DB}" -k "${PLAY_CHANNEL}" -R "${RATE}" -f "${FREQ}" -l "${TONE_DBFS}" -d "${MIN_DB}" -T "${SECONDS_PER_TONE}" -W "${WAIT_SECONDS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt

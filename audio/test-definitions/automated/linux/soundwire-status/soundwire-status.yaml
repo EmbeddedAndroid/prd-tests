@@ -1,0 +1,25 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: soundwire-status
+    description: "SoundWire enumeration: every peripheral must be Attached and
+      bound to a driver; minimum bus and peripheral counts."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - openembedded
+        - debian
+    scope:
+        - functional
+    devices:
+        - eliza-evk-emmc
+
+params:
+    MIN_MASTERS: "1"
+    MIN_PERIPHERALS: "2"
+    WAIT_SECONDS: "60"
+
+run:
+    steps:
+        - cd ./automated/linux/soundwire-status/
+        - ./soundwire-status.sh -m "${MIN_MASTERS}" -p "${MIN_PERIPHERALS}" -W "${WAIT_SECONDS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt

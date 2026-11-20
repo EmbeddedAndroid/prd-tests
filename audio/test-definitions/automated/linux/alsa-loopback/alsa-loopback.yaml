@@ -1,0 +1,59 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: alsa-loopback
+    description: "Acoustic loopback at the signal level: a sine out of each speaker
+      in turn and a short stepped sweep, recorded on the microphones at the
+      same time; the spectral peak must be at the played frequency and the
+      level there a margin above the silence baseline of the same channel.
+      A muted control must not be detected. Skipped with the reason without
+      the card, the PCMs or the tools."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - debian
+        - ubuntu
+        - fedora
+        - openembedded
+        - buildroot
+    scope:
+        - functional
+    devices:
+        - eliza-evk-emmc
+
+params:
+    # alsa: aplay/arecord on the PCMs; pipewire: pw-play/pw-record on the
+    # PipeWire nodes PLAY_PCM and CAPTURE_PCM (AudioReach PAL plugin), S16_LE.
+    AUDIO_BACKEND: "alsa"
+    # ALSA card id or name; empty is the first card.
+    CARD: ""
+    # Playback PCM name as aplay -l lists it.
+    PLAY_PCM: ""
+    # Capture PCM name as arecord -l lists it.
+    CAPTURE_PCM: ""
+    # Mixer settings that route the playback PCM to the speakers, <control>=<value> separated by ';'.
+    PLAY_MIXER: ""
+    # Mixer settings that route the microphones to the capture PCM.
+    CAPTURE_MIXER: ""
+    # Mixer settings that silence the speakers for the control run.
+    MUTE_MIXER: ""
+    # <name>:<1-based playback channel> per speaker.
+    SPEAKERS: "left:1 right:2"
+    PLAY_CHANNELS: "2"
+    CAPTURE_CHANNELS: "2"
+    RATE: "48000"
+    FREQ: "1000"
+    # Steps of the sweep, Hz.
+    SWEEP: "500 1000 2000 4000"
+    TONE_DBFS: "-12"
+    # Margin over the silence level, dB.
+    MIN_DB: "20"
+    TOLERANCE_HZ: "25"
+    SECONDS_PER_TONE: "2"
+    # How long the card gets to appear.
+    WAIT_SECONDS: "60"
+
+run:
+    steps:
+        - cd ./automated/linux/alsa-loopback/
+        - AUDIO_BACKEND="${AUDIO_BACKEND}" ./alsa-loopback.sh -c "${CARD}" -p "${PLAY_PCM}" -q "${CAPTURE_PCM}" -m "${PLAY_MIXER}" -n "${CAPTURE_MIXER}" -u "${MUTE_MIXER}" -s "${SPEAKERS}" -P "${PLAY_CHANNELS}" -C "${CAPTURE_CHANNELS}" -R "${RATE}" -f "${FREQ}" -w "${SWEEP}" -l "${TONE_DBFS}" -d "${MIN_DB}" -t "${TOLERANCE_HZ}" -T "${SECONDS_PER_TONE}" -W "${WAIT_SECONDS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt

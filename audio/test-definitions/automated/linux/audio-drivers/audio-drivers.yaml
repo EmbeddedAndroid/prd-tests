@@ -1,0 +1,29 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: audio-drivers
+    description: "Upstream audio drivers: card instantiated by the upstream
+      machine driver, every loaded audio module in-tree, topology loaded
+      without errors, audio DSP running. Out-of-tree audio modules are listed."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - openembedded
+        - debian
+    scope:
+        - functional
+    devices:
+        - eliza-evk-emmc
+
+params:
+    CARD: ""
+    # Platform driver name of the upstream machine driver, e.g. snd-sc8280xp.
+    CARD_DRIVER: ""
+    REMOTEPROC: "adsp"
+    AUDIO_MODULES: "^snd|^q6|apr|gpr|audioreach|soundwire|wsa|wcd|lpass|^agm|^pal"
+    WAIT_SECONDS: "60"
+
+run:
+    steps:
+        - cd ./automated/linux/audio-drivers/
+        - ./audio-drivers.sh -c "${CARD}" -D "${CARD_DRIVER}" -r "${REMOTEPROC}" -a "${AUDIO_MODULES}" -W "${WAIT_SECONDS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt

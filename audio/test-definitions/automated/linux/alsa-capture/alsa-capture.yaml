@@ -1,0 +1,47 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: alsa-capture
+    description: "Microphone capture levels and capture across a DSP restart: every
+      capture channel must have a live noise floor in silence and show a
+      played sine as its spectral peak a margin above it; the DSP is then
+      crashed through remoteproc debugfs during a capture, which must end,
+      the card must come back and capture the sine again."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - debian
+        - ubuntu
+        - fedora
+        - openembedded
+        - buildroot
+    scope:
+        - functional
+    devices:
+        - eliza-evk-emmc
+
+params:
+    # alsa: aplay/arecord on the PCMs; pipewire: pw-play/pw-record on the
+    # PipeWire nodes PLAY_PCM and CAPTURE_PCM (AudioReach PAL plugin), S16_LE.
+    AUDIO_BACKEND: "alsa"
+    CARD: ""
+    PLAY_PCM: ""
+    CAPTURE_PCM: ""
+    PLAY_MIXER: ""
+    CAPTURE_MIXER: ""
+    # Names of the capture channels in order (one per microphone).
+    MICS: "mic0 mic1"
+    RATE: "48000"
+    FREQ: "1000"
+    TONE_DBFS: "-12"
+    MIN_DB: "10"
+    TOLERANCE_HZ: "25"
+    SECONDS_PER_TONE: "3"
+    REMOTEPROC: "adsp"
+    BUSY_SECONDS: "10"
+    WAIT_SECONDS: "60"
+
+run:
+    steps:
+        - cd ./automated/linux/alsa-capture/
+        - AUDIO_BACKEND="${AUDIO_BACKEND}" ./alsa-capture.sh -c "${CARD}" -p "${PLAY_PCM}" -q "${CAPTURE_PCM}" -m "${PLAY_MIXER}" -n "${CAPTURE_MIXER}" -M "${MICS}" -R "${RATE}" -f "${FREQ}" -l "${TONE_DBFS}" -d "${MIN_DB}" -t "${TOLERANCE_HZ}" -T "${SECONDS_PER_TONE}" -r "${REMOTEPROC}" -b "${BUSY_SECONDS}" -W "${WAIT_SECONDS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt

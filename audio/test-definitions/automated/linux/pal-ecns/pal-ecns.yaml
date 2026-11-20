@@ -1,0 +1,41 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: pal-ecns
+    description: "Noise suppression / echo cancellation on the AudioReach PAL
+      record path: a steady speaker tone recorded on the processed (ECNS) and
+      the raw PipeWire nodes; the raw node must carry the tone, the processed
+      node must pass a burst train at the same frequency within BURST_TOL_DB
+      of the raw node (same path) and suppress the steady tone by at least
+      SUPPRESS_DB."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - openembedded
+    scope:
+        - functional
+    devices:
+        - eliza-evk-emmc
+
+params:
+    PLAY_NODE: "pal_sink_speaker_ll"
+    PROC_NODE: "pal_source_speaker_mic"
+    RAW_NODE: "pal_source_speaker_mic_raw"
+    PLAY_CHANNEL: "2"
+    RATE: "48000"
+    FREQ: "1250"
+    TONE_DBFS: "-6"
+    MIN_DB: "20"
+    SUPPRESS_DB: "10"
+    # Allowed raw vs processed difference for the burst train (keep it
+    # below SUPPRESS_DB).
+    BURST_TOL_DB: "6"
+    # Whole seconds.
+    SECONDS_PER_TONE: "6"
+    # Case name prefix, to run the test for several record usecases.
+    PREFIX: "ecns"
+
+run:
+    steps:
+        - cd ./automated/linux/pal-ecns/
+        - ./pal-ecns.sh -p "${PLAY_NODE}" -P "${PROC_NODE}" -r "${RAW_NODE}" -k "${PLAY_CHANNEL}" -R "${RATE}" -f "${FREQ}" -l "${TONE_DBFS}" -d "${MIN_DB}" -s "${SUPPRESS_DB}" -b "${BURST_TOL_DB}" -T "${SECONDS_PER_TONE}" -x "${PREFIX}"
+        - ../../utils/send-to-lava.sh ./output/result.txt

@@ -1,0 +1,41 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: alsa-upmix
+    description: "Upmixing: a mono stream to the stereo output must reach the
+      speaker; a stereo control with the tone only on a channel that speaker
+      does not reproduce must come out at least SEPARATION_DB lower."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - openembedded
+        - debian
+    scope:
+        - functional
+    devices:
+        - eliza-evk-emmc
+
+params:
+    CARD: ""
+    PLAY_PCM: ""
+    CAPTURE_PCM: ""
+    PLAY_MIXER: ""
+    CAPTURE_MIXER: ""
+    # Device the mono stream goes to; empty is plughw over PLAY_PCM.
+    UPMIX_DEV: ""
+    # 1-based stereo channel the speaker does not reproduce.
+    CONTROL_CHANNEL: "1"
+    RATE: "48000"
+    FREQ: "1250"
+    TONE_DBFS: "-6"
+    MIN_DB: "20"
+    # Mono level over control level, dB.
+    SEPARATION_DB: "15"
+    # Whole seconds.
+    SECONDS_PER_TONE: "3"
+    WAIT_SECONDS: "60"
+
+run:
+    steps:
+        - cd ./automated/linux/alsa-upmix/
+        - ./alsa-upmix.sh -c "${CARD}" -p "${PLAY_PCM}" -q "${CAPTURE_PCM}" -m "${PLAY_MIXER}" -n "${CAPTURE_MIXER}" -D "${UPMIX_DEV}" -k "${CONTROL_CHANNEL}" -R "${RATE}" -f "${FREQ}" -l "${TONE_DBFS}" -d "${MIN_DB}" -s "${SEPARATION_DB}" -T "${SECONDS_PER_TONE}" -W "${WAIT_SECONDS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt
