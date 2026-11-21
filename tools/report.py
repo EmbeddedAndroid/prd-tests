@@ -42,6 +42,57 @@ def entries(text):
             yield i, m
 
 
+BOARD = re.compile(r'PRD BOARD (\S+) PRODUCT \S+ REV (\S+)')
+
+
+def parse(text):
+    """Every runner line of a job's plain log, in order: ('board', index,
+    board, rev) for the PRD BOARD line and ('result', index, id, status,
+    reason, measurements text or None, board) for each PRD result line.
+    A reason that went on over several console lines is joined with " | "
+    and keeps the index of its first line; one never terminated ends at
+    the next result."""
+    board = '?'
+    pend = None
+
+    def result(i, msg):
+        m = LINE.search(msg)
+        if m:
+            return ('result', i, m.group(1), m.group(2), m.group(3), m.group(4), board)
+        return None
+    for i, msg in entries(text):
+        if pend and (START.match(msg) or msg.startswith('=== ')):
+            r = result(pend[0], pend[1] + ' (0.0 s)')
+            pend = None
+            if r:
+                yield r
+        if pend:
+            pend = (pend[0], pend[1] + ' | ' + msg.strip())
+            if not END.search(msg):
+                continue
+            i, msg = pend
+            pend = None
+        elif START.match(msg) and not LINE.search(msg):
+            pend = (i, msg)
+            continue
+        m = BOARD.search(msg)
+        if m:
+            board = m.group(1)
+            yield ('board', i, m.group(1), m.group(2))
+        r = result(i, msg)
+        if r:
+            yield r
+    if pend:
+        r = result(pend[0], pend[1] + ' (0.0 s)')
+        if r:
+            yield r
+
+
+def plain_log(lava, job):
+    url = '%s/scheduler/job/%s/log_file/plain' % (lava.rstrip('/'), job)
+    return urllib.request.urlopen(url, timeout=120).read().decode('utf-8', 'replace')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--product', required=True, action='append')
@@ -56,40 +107,15 @@ def main():
             reqs[rid] = req
     res = {}
     meta = []
+    base = a.lava.rstrip('/')
     for j in a.jobs:
-        url = '%s/scheduler/job/%s/log_file/plain' % (a.lava.rstrip('/'), j)
-        text = urllib.request.urlopen(url, timeout=120).read().decode('utf-8', 'replace')
-
-        def take(i, msg):
-            m = LINE.search(msg)
-            if m:
-                res.setdefault(m.group(1), []).append(
-                    (m.group(2), m.group(3), '%s/scheduler/job/%s#L%d' % (a.lava.rstrip('/'), j, i),
-                     meta_board[0]))
-        meta_board = ['?']
-        pend = None     # a PRD line whose reason went on over console lines
-        for i, msg in entries(text):
-            if pend and (START.match(msg) or msg.startswith('=== ')):
-                # never terminated: keep what was printed, end at the next result
-                take(pend[0], pend[1] + ' (0.0 s)')
-                pend = None
-            if pend:
-                pend = (pend[0], pend[1] + ' | ' + msg.strip())
-                if not END.search(msg):
-                    continue
-                i, msg = pend
-                pend = None
-            elif START.match(msg) and not LINE.search(msg):
-                pend = (i, msg)
-                continue
-            m = re.search(r'PRD BOARD (\S+) PRODUCT \S+ REV (\S+)', msg)
-            if m:
-                meta_board[0] = m.group(1)
+        for e in parse(plain_log(a.lava, j)):
+            if e[0] == 'board':
                 meta.append('[%s](%s/scheduler/job/%s#L%d): board %s, tests %s' % (
-                    j, a.lava.rstrip('/'), j, i, m.group(1), m.group(2)))
-            take(i, msg)
-        if pend:
-            take(pend[0], pend[1] + ' (0.0 s)')
+                    j, base, j, e[1], e[2], e[3]))
+            else:
+                res.setdefault(e[2], []).append(
+                    (e[3], e[4], '%s/scheduler/job/%s#L%d' % (base, j, e[1]), e[6]))
     out = ['Jobs: ' + '; '.join(meta), '']
     counts = {}
     out.append('| ID | requirement | result | reason | log |')

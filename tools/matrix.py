@@ -13,9 +13,7 @@ import argparse
 import importlib.util
 import json
 import os
-import re
 import sys
-import urllib.request
 
 import yaml
 
@@ -34,24 +32,10 @@ def from_jsonl(path):
 
 
 def from_lava(lava, job):
-    url = '%s/scheduler/job/%s/log_file/plain' % (lava.rstrip('/'), job)
-    text = urllib.request.urlopen(url, timeout=120).read().decode('utf-8', 'replace')
-    out, pend = {}, None
-    for i, msg in report.entries(text):
-        if pend and (report.START.match(msg) or msg.startswith('=== ')):
-            pend = None
-        if pend:
-            pend = (pend[0], pend[1] + ' ' + msg.strip())
-            if not report.END.search(msg):
-                continue
-            i, msg = pend
-            pend = None
-        elif report.START.match(msg) and not report.LINE.search(msg):
-            pend = (i, msg)
-            continue
-        m = report.LINE.search(msg)
-        if m:
-            out[m.group(1)] = (m.group(2), '%s/scheduler/job/%s#L%d' % (lava.rstrip('/'), job, i))
+    out = {}
+    for e in report.parse(report.plain_log(lava, job)):
+        if e[0] == 'result':
+            out[e[2]] = (e[3], '%s/scheduler/job/%s#L%d' % (lava.rstrip('/'), job, e[1]))
     return out
 
 
