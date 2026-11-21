@@ -1310,6 +1310,16 @@ def t_clone_writeback(env, connector='primary'):
     crtc = next((c for c in d.card.possible_crtcs(k) if c in shared), None)
     if crtc is None:
         return 'fail', 'no CRTC drives both %s and the writeback connector' % k['name']
+    # the atomic check refuses two encoders on one CRTC unless each lists the other
+    c = d.card
+    bit = lambda e: 1 << c.encoder_ids.index(e)
+    pairs = [(ke, we) for ke in k['encoders'] for we in d.wb['encoders']
+             if c.encoder(ke)['possible_clones'] & bit(we) and c.encoder(we)['possible_clones'] & bit(ke)]
+    if not pairs:
+        return ('fail', 'the driver allows no clone of %s with the writeback connector: encoder '
+                'possible_clones %s, writeback %s' % (
+                    k['name'], [hex(c.encoder(e)['possible_clones']) for e in k['encoders']],
+                    [hex(c.encoder(e)['possible_clones']) for e in d.wb['encoders']]))
     mode = pick_mode(k, 'preferred')
     for tries in range(1, 4):
         r = clone_once(d, k, crtc, mode)

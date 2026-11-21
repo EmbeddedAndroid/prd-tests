@@ -78,6 +78,7 @@ known_fail:
   GDS-022: vkms has no colour transform matrix
   GDS-023: the vkms connector has no max bpc property
   GDS-024: vkms has no variable refresh rate
+  GDS-025: vkms encoders list only themselves in possible_clones, so the virtual connector and writeback cannot share a CRTC
   GDS-029: a VM boots without a boot loader framebuffer
   GAU-017: alsabat's round trip asks snd-aloop for a period equal to its 16-frame buffer, which snd-aloop refuses
   GCA-005: libcamerasrc (libcamera 0.2) on vimc with the software ISP delivers one buffer and stalls; cam captures from the same camera (GCA-004)

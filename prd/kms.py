@@ -191,7 +191,7 @@ class Card:
     def encoder(self, eid):
         b = self.ioctl(GETENCODER, bytearray(struct.pack('<IIIII', eid, 0, 0, 0, 0)))
         _, t, crtc, possible, clones = struct.unpack('<IIIII', b)
-        return {'id': eid, 'type': t, 'crtc': crtc, 'possible_crtcs': possible}
+        return {'id': eid, 'type': t, 'crtc': crtc, 'possible_crtcs': possible, 'possible_clones': clones}
 
     def possible_crtcs(self, conn):
         m = 0
