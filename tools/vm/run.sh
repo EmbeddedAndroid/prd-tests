@@ -5,11 +5,11 @@
 # pass on hardware that is not there.
 #
 # Default: boot Ubuntu's generic kernel in QEMU with virtme-ng on the
-# host root file system and a software TPM (swtpm) attached. PRD_VM=native
-# (for an arm64 cloud VM or CI runner without KVM, where an emulated guest
-# is too slow for udev; such a host is a QEMU/KVM guest itself) runs the
-# suite on the host's own kernel instead, with the same drivers loaded and
-# swtpm behind tpm_vtpm_proxy. Native mode stops PipeWire and WirePlumber
+# host root file system and a software TPM (swtpm) attached; with KVM if
+# the host has it, emulated otherwise. PRD_VM=native runs the suite on
+# the host's own kernel instead, with the same drivers loaded and swtpm
+# behind tpm_vtpm_proxy, about six times faster than emulation on an
+# arm64 VM without KVM. Native mode stops PipeWire and WirePlumber
 # and unbinds the framebuffer console for the run: use it on a throwaway
 # VM, not a workstation. Needs tools/vm/setup-host.sh.
 set -eu
@@ -64,8 +64,18 @@ if [ "$mode_vm" = native ]; then
 	exit $?
 fi
 swtpm socket --tpm2 --tpmstate dir="$tpm" --ctrl type=unixio,path="$tpm/sock" --daemon
+kvm= tcg= cpus=2
 case "$(uname -m)" in
-	aarch64) tdev=tpm-tis-device ;;
+	aarch64)
+		tdev=tpm-tis-device
+		# virtme-ng asks for the host GIC and CPU on arm64 whether or not
+		# there is KVM
+		if [ ! -w /dev/kvm ]; then
+			kvm=--disable-kvm
+			tcg="-machine virt,gic-version=max -cpu max,pauth-impdef=on"
+			cpus=$(nproc)
+		fi
+		;;
 	*) tdev=tpm-tis ;;
 esac
 k=$(ls /boot/vmlinuz-*-generic | sort -V | tail -1)
@@ -79,8 +89,8 @@ fi
 # QEMU's 9p server holds a host descriptor for every file open in the
 # guest; at a 1024 soft limit guest programs fail with EMFILE
 ulimit -n "$(ulimit -Hn)"
-timeout 3600 vng --run "$k" --user root --rw --memory 3G --cpus 2 \
-	--qemu-opts="-chardev socket,id=chrtpm,path=$tpm/sock -tpmdev emulator,id=tpm0,chardev=chrtpm -device $tdev,tpmdev=tpm0" \
+timeout 3600 vng --run "$k" $kvm --user root --rw --memory 3G --cpus "$cpus" \
+	--qemu-opts="$tcg -chardev socket,id=chrtpm,path=$tpm/sock -tpmdev emulator,id=tpm0,chardev=chrtpm -device $tdev,tpmdev=tpm0" \
 	--exec "sh $top/tools/vm/inside.sh $mode $product $out" > "$out/console.log" 2>&1 || true
 tail -5 "$out/console.log"
 rm -rf "$tpm"
