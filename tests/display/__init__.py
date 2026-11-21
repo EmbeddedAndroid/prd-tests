@@ -810,6 +810,23 @@ def t_alpha(env):
     return ('pass' if ok else 'fail', '; '.join(out))
 
 
+# luma weights (Kr, Kb) of the YCbCr encodings KMS names in COLOR_ENCODING
+YCBCR_K = {'BT.601': (0.299, 0.114), 'BT.709': (0.2126, 0.0722), 'BT.2020': (0.2627, 0.0593)}
+# every wrong encoding/range pairing decodes this colour at least 10 levels off
+CSC_RGB = (20, 220, 100)
+
+
+def rgb_to_ycbcr(rgb, enc, full):
+    """8-bit Y, Cb, Cr of an RGB colour in an encoding and range."""
+    kr, kb = YCBCR_K[enc]
+    r, g, b = [c / 255 for c in rgb]
+    y = kr * r + (1 - kr - kb) * g + kb * b
+    cb, cr = (b - y) / (2 * (1 - kb)), (r - y) / (2 * (1 - kr))
+    if full:
+        return round(y * 255), round(128 + cb * 255), round(128 + cr * 255)
+    return round(16 + 219 * y), round(128 + 224 * cb), round(128 + 224 * cr)
+
+
 @wbtest('display.csc')
 def t_csc(env):
     """Colour space conversion: a YUV (NV12) layer converted to RGB, matrix and range selectable"""
@@ -820,38 +837,58 @@ def t_csc(env):
         return 'fail', 'no plane on the writeback CRTC takes NV12'
     enc = pl['props'].get('COLOR_ENCODING')
     rng = pl['props'].get('COLOR_RANGE')
-    # pure red, limited range: BT.601 Y81 U90 V240, BT.709 Y63 U102 V240
-    cases = [('BT.601', 81, 90, 240), ('BT.709', 63, 102, 240)]
-    if not enc or not rng:
-        cases = cases[:1]
-    out, good = [], []
-    for name, y, u, v in cases:
-        props = {}
-        if enc and rng:
-            ee = d.card.prop_info(enc[0])['enums']
-            rr = d.card.prop_info(rng[0])['enums']
-            en = next((k for k in ee if name.replace('.', '').lower() in k.replace('.', '').lower()), None)
-            rn = next((k for k in rr if 'limited' in k.lower()), None)
-            if en is None or rn is None:
-                out.append('%s limited not offered (%s; %s)' % (name, list(ee), list(rr)))
+    ee = d.card.prop_info(enc[0])['enums'] if enc else {}
+    rr = d.card.prop_info(rng[0])['enums'] if rng else {}
+    pick = lambda enums, want: next((k for k in enums if want in k.replace('.', '').lower()), None)
+    out, good, missing, tried = [], [], [], []
+    for name in YCBCR_K:
+        for full in (False, True):
+            label = '%s %s' % (name, 'full' if full else 'limited')
+            props = {}
+            if enc and rng:
+                en = pick(ee, name.replace('.', '').lower())
+                rn = pick(rr, 'full' if full else 'limited')
+                if en is None or rn is None:
+                    missing.append(label)
+                    continue
+                props = {'COLOR_ENCODING': ee[en], 'COLOR_RANGE': rr[rn]}
+            elif label != 'BT.601 limited':
                 continue
-            props = {'COLOR_ENCODING': ee[en], 'COLOR_RANGE': rr[rn]}
-        fb = fb_nv12(d.card, WB_W, WB_H, y, u, v)
-        cap, err = compose(d, [Layer(fb[0], WB_W, WB_H, (0, 0, WB_W, WB_H), props=props)])
-        free(d.card, fb)
-        if err:
-            out.append('%s: %s' % (name, err))
-            continue
-        got = px(cap, 100, 100)
-        d.card.free_dumb(cap)
-        out.append('NV12 %s limited red Y%d U%d V%d -> %s' % (name, y, u, v, got))
-        if near(got, RED, 20):
-            good.append(name)
+            tried.append(label)
+            y, u, v = rgb_to_ycbcr(CSC_RGB, name, full)
+            fb = fb_nv12(d.card, WB_W, WB_H, y, u, v)
+            cap, err = compose(d, [Layer(fb[0], WB_W, WB_H, (0, 0, WB_W, WB_H), props=props)])
+            free(d.card, fb)
+            if err:
+                out.append('%s: %s' % (label, err))
+                continue
+            got = px(cap, 100, 100)
+            d.card.free_dumb(cap)
+            out.append('%s Y%d U%d V%d -> %s' % (label, y, u, v, got))
+            if near(got, CSC_RGB, 4):
+                good.append(label)
+    out.insert(0, 'expect %s' % (CSC_RGB,))
     if not enc or not rng:
         return ('partial' if good else 'fail', '; '.join(out) + '; the plane has no COLOR_ENCODING/'
                 'COLOR_RANGE property, so only the driver default matrix is used')
-    return ('pass' if len(good) == len(cases) else 'partial' if good else 'fail', '; '.join(out),
-            {'matrices': good})
+    # the colour properties must leave an RGB layer alone
+    rgbp = {'COLOR_ENCODING': ee[pick(ee, 'bt709') or next(iter(ee))],
+            'COLOR_RANGE': rr[pick(rr, 'full') or next(iter(rr))]}
+    fb = fb_solid(d.card, WB_W, WB_H, CSC_RGB)
+    cap, err = compose(d, [Layer(fb[0], WB_W, WB_H, (0, 0, WB_W, WB_H), props=rgbp)])
+    free(d.card, fb)
+    rgb_ok = False
+    if err:
+        out.append('RGB layer with colour properties: %s' % err)
+    else:
+        got = px(cap, 100, 100)
+        d.card.free_dumb(cap)
+        rgb_ok = near(got, CSC_RGB, 1)
+        out.append('XR24 layer with colour properties -> %s' % (got,))
+    if missing:
+        out.append('not offered: %s' % ', '.join(missing))
+    st = 'pass' if len(good) == len(tried) == 6 and rgb_ok else 'partial' if good else 'fail'
+    return st, '; '.join(out), {'matrices': good}
 
 
 BPP = {'XR24': 32, 'AR24': 32, 'XB24': 32, 'AB24': 32, 'RX24': 32, 'RA24': 32, 'BX24': 32,
