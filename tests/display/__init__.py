@@ -300,14 +300,16 @@ def plane_req(p, crtc, L, card):
     return r
 
 
-def compose_once(d, layers, crtc_extra=None, wb_fmt=XR24, w=WB_W, h=WB_H, test_only=False):
+def compose_once(d, layers, crtc_extra=None, wb_fmt=XR24, w=WB_W, h=WB_H, test_only=False,
+                 planes=None):
     """Commit layers on the writeback CRTC and capture the output.
+    planes picks the planes in layer order instead of planes_for.
     Returns (capture dumb buffer, None) or (None, error string)."""
     card = d.card
     crtc = d.wb_crtc()
     if crtc is None:
         return None, 'no writeback connector'
-    cand = d.planes_for(crtc)
+    cand = planes or d.planes_for(crtc)
     if len(layers) > len(cand):
         return None, 'only %d planes on the writeback CRTC' % len(cand)
     mblob = card.create_blob(kms.Mode.make(w, h).raw)
@@ -395,12 +397,13 @@ def untouched(cap, w, h):
     return all(m[y * p + x * 4:y * p + x * 4 + 4] == FILL for x, y in pts)
 
 
-def compose(d, layers, crtc_extra=None, wb_fmt=XR24, w=WB_W, h=WB_H, test_only=False, tries=3):
+def compose(d, layers, crtc_extra=None, wb_fmt=XR24, w=WB_W, h=WB_H, test_only=False, tries=3,
+            planes=None):
     """compose_once, repeated when the fence signalled but the frame was
     not written (the capture still holds its fill pattern). Retries are
     counted in d.wb_empty; tests made with wbtest report them."""
     for i in range(tries):
-        cap, err = compose_once(d, layers, crtc_extra, wb_fmt, w, h, test_only)
+        cap, err = compose_once(d, layers, crtc_extra, wb_fmt, w, h, test_only, planes)
         if err or test_only or not untouched(cap, w, h):
             return cap, err
         d.wb_empty += 1
@@ -867,7 +870,8 @@ def t_csc(env):
             tried.append(label)
             y, u, v = rgb_to_ycbcr(CSC_RGB, name, full)
             fb = fb_nv12(d.card, WB_W, WB_H, y, u, v)
-            cap, err = compose(d, [Layer(fb[0], WB_W, WB_H, (0, 0, WB_W, WB_H), props=props)])
+            cap, err = compose(d, [Layer(fb[0], WB_W, WB_H, (0, 0, WB_W, WB_H), props=props)],
+                               planes=[pl])
             free(d.card, fb)
             if err:
                 out.append('%s: %s' % (label, err))
@@ -885,7 +889,7 @@ def t_csc(env):
     rgbp = {'COLOR_ENCODING': ee[pick(ee, 'bt709') or next(iter(ee))],
             'COLOR_RANGE': rr[pick(rr, 'full') or next(iter(rr))]}
     fb = fb_solid(d.card, WB_W, WB_H, CSC_RGB)
-    cap, err = compose(d, [Layer(fb[0], WB_W, WB_H, (0, 0, WB_W, WB_H), props=rgbp)])
+    cap, err = compose(d, [Layer(fb[0], WB_W, WB_H, (0, 0, WB_W, WB_H), props=rgbp)], planes=[pl])
     free(d.card, fb)
     rgb_ok = False
     if err:
