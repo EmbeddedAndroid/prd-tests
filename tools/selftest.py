@@ -288,6 +288,41 @@ def check_units():
                      ('c', 0x10008, False), ('d', 0x10013, False), ('e', 0x20001, False)]) != \
                 {'sensor': 2, 'csiphy': 1, 'tfe_mc': 1}:
             bad.append('camx roles')
+    dp = sys.modules.get('tests.display')
+    if dp is not None:
+        # every wrong encoding/range decodes CSC_RGB at least 10 levels off,
+        # the right one within 1 (8-bit rounding)
+        def decode(yuv, enc, full):
+            kr, kb = dp.YCBCR_K[enc]
+            y, cb, cr = yuv
+            y, cb, cr = ((y / 255, (cb - 128) / 255, (cr - 128) / 255) if full else
+                         ((y - 16) / 219, (cb - 128) / 224, (cr - 128) / 224))
+            r, b = y + 2 * (1 - kr) * cr, y + 2 * (1 - kb) * cb
+            g = (y - kr * r - kb * b) / (1 - kr - kb)
+            return tuple(min(255, max(0, round(c * 255))) for c in (r, g, b))
+        keys = [(e, f) for e in dp.YCBCR_K for f in (False, True)]
+        for ek in keys:
+            yuv = dp.rgb_to_ycbcr(dp.CSC_RGB, *ek)
+            for dk in keys:
+                err = max(abs(a - b) for a, b in zip(decode(yuv, *dk), dp.CSC_RGB))
+                if (ek == dk and err > 1) or (ek != dk and err < 10):
+                    bad.append('csc %s decoded as %s is %d levels off' % (ek, dk, err))
+        # little-endian bytes of (R, G, B) = (0x11, 0x22, 0x33), from drm_fourcc.h
+        for n, raw, want in (('XR24', b'\x33\x22\x11\x00', (0x11, 0x22, 0x33)),
+                             ('XB24', b'\x11\x22\x33\x00', (0x11, 0x22, 0x33)),
+                             ('RG24', b'\x33\x22\x11', (0x11, 0x22, 0x33)),
+                             ('BG24', b'\x11\x22\x33', (0x11, 0x22, 0x33)),
+                             ('RG16', b'\x00\xf8', (255, 0, 0)),
+                             ('BG16', b'\x1f\x00', (255, 0, 0)),
+                             ('AR30', b'\x00\x00\xf0\x3f', (255, 0, 0)),
+                             ('RX15', b'\x00\xf8', (255, 0, 0))):
+            got = dp.px_fmt({'pitch': 64, 'map': raw + bytes(64)}, 0, 0, n)
+            if got != want:
+                bad.append('px_fmt %s: got %s, want %s' % (n, got, want))
+        # packed 4:2:2 byte order (Y0, Cb, Y1, Cr indices), drm_fourcc.h
+        if dp.PACKED_YUV != {'YUYV': (0, 1, 2, 3), 'YVYU': (0, 3, 2, 1), 'UYVY': (1, 0, 3, 2),
+                             'VYUY': (3, 0, 1, 2)}:
+            bad.append('PACKED_YUV order %s' % dp.PACKED_YUV)
     r = core.Runner(core.Env({}), tempfile.mkdtemp(prefix='prd-selftest-'))
     r.missing = 'skip'
     st_, why, _ = r.call('fake.missing', {})
