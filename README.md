@@ -173,7 +173,9 @@ Copy a profile in `boards/` and fill in what applies:
   boards are shared with jobs at medium).
 - `display`: the connector type of the `primary` display and the
   `external` ones (`HDMI-A`, `DP`, `DSI`, `eDP`), the compositor unit
-  and its Wayland socket (found under /run/user otherwise).
+  and its Wayland socket (found under /run/user otherwise);
+  `gpu_busy`, a GPU busy counter file, for GPU drivers that report no
+  DRM client usage stats.
 - `audio`: card, playback and capture PCMs with their mixer routes,
   mute/unmute, a second playback front end, a lower volume setting,
   `loopback` when the speaker is heard by the microphones, the audio
