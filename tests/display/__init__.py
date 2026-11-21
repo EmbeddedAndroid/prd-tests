@@ -929,9 +929,29 @@ def fb_any(card, f, w=64, h=64):
     return None, 'layout unknown to this test'
 
 
+# byte order of one 2-pixel group: indices into (Y0, Cb, Y1, Cr)
+PACKED_YUV = {'YUYV': (0, 1, 2, 3), 'YVYU': (0, 3, 2, 1), 'UYVY': (1, 0, 3, 2), 'VYUY': (3, 0, 1, 2)}
+
+
+def packed_check(d, fb, buf, n):
+    """Scan out a packed 4:2:2 buffer of CSC_RGB (BT.601 limited, the
+    default encoding) and check its colour: None, or the error."""
+    y, u, v = rgb_to_ycbcr(CSC_RGB, 'BT.601', False)
+    grp = bytes((y, u, y, v)[i] for i in PACKED_YUV[n])
+    for r in range(64):
+        o = r * buf['pitch']
+        buf['map'][o:o + 128] = grp * 32
+    cap, err = compose(d, [Layer(fb, 64, 64, (0, 0, 64, 64))])
+    if err:
+        return err
+    got = px(cap, 32, 32)
+    d.card.free_dumb(cap)
+    return None if near(got, CSC_RGB, 4) else 'shows %s for %s, expected %s' % (got, (y, u, v), CSC_RGB)
+
+
 @test('display.formats')
 def t_formats(env):
-    """Input formats: every advertised linear format commits on a plane"""
+    """Input formats: every advertised linear format commits on a plane; packed YUV colour checked"""
     d = K(env)
     d.need_wb()
     pl = d.planes_for(d.wb_crtc())[0]
@@ -948,6 +968,8 @@ def t_formats(env):
             skipped.append(n)
             continue
         _, err = compose(d, [Layer(fb, 64, 64, (0, 0, 64, 64))], test_only=True)
+        if not err and n in PACKED_YUV:
+            err = packed_check(d, fb, buf, n)
         (bad.append('%s %s' % (n, err)) if err else ok_l.append(n))
         free(d.card, (fb, buf))
     reason = '%d formats commit (%s)' % (len(ok_l), ' '.join(ok_l))
