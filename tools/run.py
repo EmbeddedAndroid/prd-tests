@@ -3,14 +3,16 @@
 """run.py: run a product's requirements on this device.
 
     run.py --board boards/<board>.yaml --product products/<product>.yaml
-           [-o outdir] [--area display,audio] [ID ...]
+           [--product ...] [-o outdir] [--area display,audio] [ID ...]
     run.py --list                      every registered test
     run.py --board B --test display.edid [key=value ...]   one test
 
 Each requirement of the product map names a generic test, its
 arguments and an optional target; the board profile supplies what the
 tests cannot discover (which connector is the primary display, audio
-routes, hardware the board does not have). One "PRD <ID> <status>:
+routes, hardware the board does not have, targets). Several products
+run as one list (IDs must not repeat), each with its own "missing"
+policy. One "PRD <ID> <status>:
 <reason>" line per requirement; <outdir>/result.txt is in the format
 send-to-lava.sh reads, <outdir>/results.jsonl keeps the measurements."""
 import argparse
@@ -56,7 +58,7 @@ def order(board, todo):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--board')
-    ap.add_argument('--product')
+    ap.add_argument('--product', action='append', default=[])
     ap.add_argument('-o', '--outdir', default='output')
     ap.add_argument('--area', help='comma separated areas (the product\'s areas map by ID prefix, else the test interface)')
     ap.add_argument('--test', help='run one test by name instead of a product')
@@ -73,7 +75,8 @@ def main():
     env = core.Env(board)
     run = core.Runner(env, a.outdir)
     print('PRD BOARD %s PRODUCT %s REV %s' % (
-        board.get('name', '-'), os.path.basename(a.product or '-'),
+        board.get('name', '-'), '+'.join(os.path.splitext(os.path.basename(p))[0]
+                                         for p in a.product) or '-',
         core.read(os.path.join(TOP, 'REV')).strip() or '-'), flush=True)
     if a.test:
         args = dict(kv.split('=', 1) for kv in a.ids)
@@ -82,19 +85,24 @@ def main():
         return 0
     if not a.product:
         ap.error('--product or --test is required')
-    prod = core.load_data(a.product)
-    run.missing = prod.get('missing', 'fail')
     areas = set(a.area.split(',')) if a.area else None
-    todo = []
-    for rid, req in prod['requirements'].items():
-        if a.ids and rid not in a.ids:
-            continue
-        area = (prod.get('areas') or {}).get(rid.split('-')[0]) or \
-            str(req.get('test') or req['tests'][0]['test']).split('.')[0]
-        if areas and area not in areas:
-            continue
-        todo.append((rid, req))
+    todo, seen, policy = [], set(), {}
+    for pf in a.product:
+        prod = core.load_data(pf)
+        for rid, req in prod['requirements'].items():
+            if rid in seen:
+                ap.error('%s: requirement %s is in an earlier product too' % (pf, rid))
+            seen.add(rid)
+            policy[rid] = prod.get('missing', 'fail')
+            if a.ids and rid not in a.ids:
+                continue
+            area = (prod.get('areas') or {}).get(rid.split('-')[0]) or \
+                str(req.get('test') or req['tests'][0]['test']).split('.')[0]
+            if areas and area not in areas:
+                continue
+            todo.append((rid, req))
     for rid, req in order(board, todo):
+        run.missing = policy[rid]
         try:
             run.requirement(rid, req)
         except Exception as e:  # never lose the requirements after this one

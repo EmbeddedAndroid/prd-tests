@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0
 """matrix.py: test x platform matrix of a product run on several boards.
 
-    matrix.py --product products/generic.yaml [--lava https://<lava>]
+    matrix.py --product products/generic.yaml [--product ...] [--lava https://<lava>]
               <label>=<LAVA job id | results.jsonl> ...
 
 One row per requirement (its test), one column per platform, each cell
@@ -57,11 +57,16 @@ def from_lava(lava, job):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--product', required=True)
+    ap.add_argument('--product', required=True, action='append')
     ap.add_argument('--lava', default='https://lava.infra.foundries.io')
     ap.add_argument('sources', nargs='+')
     a = ap.parse_args()
-    prod = yaml.safe_load(open(a.product))
+    reqs = {}
+    for pf in a.product:
+        for rid, req in yaml.safe_load(open(pf))['requirements'].items():
+            if rid in reqs:
+                ap.error('%s: requirement %s is in an earlier product too' % (pf, rid))
+            reqs[rid] = req
     cols = []
     for s in a.sources:
         label, src = s.split('=', 1)
@@ -70,7 +75,7 @@ def main():
     out = ['| ID | test | ' + ' | '.join(c[0] for c in cols) + ' |',
            '|---|---|' + '---|' * len(cols)]
     counts = [{} for _ in cols]
-    for rid, req in prod['requirements'].items():
+    for rid, req in reqs.items():
         test = req.get('test') or '+'.join(p['test'] for p in req.get('tests', []))
         args = req.get('args') or {}
         brief = ' '.join('%s' % v for k, v in sorted(args.items()) if k in ('prop', 'role', 'kind',

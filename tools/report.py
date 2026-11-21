@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0
 """report.py: results table of a product run from LAVA job logs.
 
-    report.py --product products/<p>.yaml --lava https://<lava> JOB [JOB ...]
+    report.py --product products/<p>.yaml [--product ...] --lava https://<lava> JOB [JOB ...]
 
 Reads each job's public plain log, takes the "PRD <ID> <status>: <reason>"
 lines the runner printed and writes a markdown table on stdout: one row
@@ -44,11 +44,16 @@ def entries(text):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('--product', required=True)
+    ap.add_argument('--product', required=True, action='append')
     ap.add_argument('--lava', required=True)
     ap.add_argument('jobs', nargs='+')
     a = ap.parse_args()
-    prod = yaml.safe_load(open(a.product))
+    reqs = {}
+    for pf in a.product:
+        for rid, req in yaml.safe_load(open(pf))['requirements'].items():
+            if rid in reqs:
+                ap.error('%s: requirement %s is in an earlier product too' % (pf, rid))
+            reqs[rid] = req
     res = {}
     meta = []
     for j in a.jobs:
@@ -89,7 +94,7 @@ def main():
     counts = {}
     out.append('| ID | requirement | result | reason | log |')
     out.append('|---|---|---|---|---|')
-    for rid, req in prod['requirements'].items():
+    for rid, req in reqs.items():
         rs = res.get(rid)
         if not rs:
             counts['not run'] = counts.get('not run', 0) + 1

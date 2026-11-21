@@ -4,7 +4,7 @@
 product's requirements with tools/run.py from the overlay.
 
     mk-lava-job.py --board boards/<board>.yaml --product products/<p>.yaml
-                   --tag <name> [--device <lava device>] [--fp <fingerprint>]
+                   [--product ...] --tag <name> [--device <lava device>] [--fp <fingerprint>]
                    [--area display,audio] [-o jobs] [ID ...]
 
 Deploy and boot come from the board profile's lava section (device type,
@@ -111,7 +111,7 @@ def fp_monitor(fp):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--board', required=True)
-    ap.add_argument('--product', required=True)
+    ap.add_argument('--product', required=True, action='append')
     ap.add_argument('--tag', required=True)
     ap.add_argument('--device')
     ap.add_argument('--fp')
@@ -122,7 +122,14 @@ def main():
     board = yaml.safe_load(open(a.board))
     lv = board['lava']
     bname = os.path.splitext(os.path.basename(a.board))[0]
-    pname = os.path.splitext(os.path.basename(a.product))[0]
+    pnames = [os.path.splitext(os.path.basename(p))[0] for p in a.product]
+    seen = set()
+    for pf in a.product:
+        for rid in yaml.safe_load(open(pf))['requirements']:
+            if rid in seen:
+                sys.exit('%s: requirement %s is in an earlier product too' % (pf, rid))
+            seen.add(rid)
+    pname = '+'.join(pnames)
     image_dir = os.environ.get('IMAGE_DIR', lv['image_dir'])
     if lv.get('firmware_fingerprint') and not a.fp:
         sys.exit('board %s embeds a build fingerprint: --fp is required' % bname)
@@ -146,9 +153,10 @@ def main():
                 a.fp, lv['rootfs_fingerprint']))
     steps += ['while [ $(cut -d. -f1 /proc/uptime) -lt 60 ]; do sleep 5; done; cat /proc/uptime',
               "lava-test-case prd-runner --shell 'cd /prd && python3 tools/run.py "
-              "--board boards/%s.json --product products/%s.json -o /tmp/prd-out%s'" % (bname, pname, sel),
+              "--board boards/%s.json%s -o /tmp/prd-out%s'" % (
+                  bname, ''.join(' --product products/%s.json' % p for p in pnames), sel),
               '/prd/utils/send-to-lava.sh /tmp/prd-out/result.txt']
-    name = '%s-%s' % (pname, bname)
+    name = '%s-%s' % ('-'.join(pnames), bname)
     acts.append({'test': {'definitions': [{
         'from': 'inline', 'name': name, 'path': 'inline/%s.yaml' % name,
         'repository': {'metadata': {'format': 'Lava-Test Test Definition 1.0', 'name': name},
