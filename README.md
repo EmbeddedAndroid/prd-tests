@@ -1,10 +1,12 @@
 # prd-tests
 
-Product requirement tests on standard Linux interfaces. A product's
-requirements are mapped to generic tests; a board profile supplies the
-few facts a test cannot discover; one runner executes the map on a
-device and reports every requirement as pass, partial, fail or skip
-with the reason and the measurements.
+Product requirement tests on standard Linux interfaces. The tests are
+rows of two products: `products/generic.yaml`, the standard upstream
+interfaces every open Linux stack should pass, and `products/qcom.yaml`,
+the interfaces and KPIs only Qualcomm stacks have. A board profile
+supplies the few facts a test cannot discover and the numbers the board
+must reach; one runner executes the rows on a device and reports each
+as pass, partial, fail or skip with the reason and the measurements.
 
 The tests use the kernel and user space interfaces any board exposes:
 DRM/KMS (atomic API, dumb buffers, writeback) and Wayland/EGL for
@@ -24,7 +26,7 @@ paths live in optional modules a board profile enables
 | `prd/` | runner library: test registry, result rules, target evaluation (`core.py`); raw-ioctl KMS and V4L2 clients (`kms.py`, `v4l2.py`); python3 standard library only |
 | `tests/<interface>/` | the generic tests of one interface: `display`, `video`, `camera`, `audio` (with the shell `test-definitions` cases), `platform`; optional vendor modules `audioreach` and `camx` |
 | `boards/<board>.yaml` | board profiles: LAVA deploy data, display roles, audio routes and cases, camera graph setup, enabled modules, hardware the board does not have |
-| `products/<product>.yaml` | product maps: requirement ID to test, arguments and target |
+| `products/generic.yaml`, `products/qcom.yaml` | the rows: ID to test, arguments and target; standard interfaces and Qualcomm-specific ones |
 | `tools/run.py` | the runner (on the device) |
 | `tools/mk-overlay.sh` | tars runner, tests, profiles and maps for a LAVA overlay at `/prd` |
 | `tools/fetch-vectors.sh` | downloads the public video conformance vectors for the overlay |
@@ -42,7 +44,7 @@ paths live in optional modules a board profile enables
 Every requirement gets exactly one of:
 
 - pass: measured and meets what the test checks, and the target if the
-  map or the board profile gives one;
+  row or the board profile gives one;
 - partial: works, but the target is not met or not measured, or the
   requirement states no number (`target: none`), or only part of the
   feature could be exercised; reported to LAVA as `unknown`, never as
@@ -74,9 +76,10 @@ reason and measurements per requirement).
 On a device with python3 (no other module needed when the overlay's
 JSON copies of the YAML files are used):
 
-    python3 tools/run.py --board boards/eliza-evk.yaml --product products/eliza.yaml -o out
+    python3 tools/run.py --board boards/eliza-evk.yaml --product products/generic.yaml \
+        --product products/qcom.yaml -o out
     python3 tools/run.py --board ... --product ... --area display          # one area
-    python3 tools/run.py --board ... --product ... DSP-023 DSP-026          # some IDs
+    python3 tools/run.py --board ... --product ... GDS-023 GDS-026          # some IDs
     python3 tools/run.py --list                                             # every test
     python3 tools/run.py --board boards/eliza-evk.yaml --test display.edid connector=HDMI-A
 
@@ -89,20 +92,20 @@ In LAVA (host side, python3 with PyYAML):
     sh tools/fetch-vectors.sh vectors           # optional: video conformance vectors
     sh tools/mk-overlay.sh prd.tar vectors      # upload prd.tar where the dispatcher can fetch it
     export IMAGE_URL=... PRD_URL=... ROOT_PW=...   # optional ARTIFACT_HEADER, PRD_HEADER
-    python3 tools/mk-lava-job.py --board boards/eliza-evk.yaml --product products/eliza.yaml \
-        --tag run1 --device <lava device> --fp <build fingerprint> -o jobs
+    python3 tools/mk-lava-job.py --board boards/eliza-evk.yaml --product products/generic.yaml \
+        --product products/qcom.yaml --tag run1 --device <lava device> --fp <build fingerprint> -o jobs
 
 The job flashes the image with qdl, checks the build fingerprint where
 the profile says the image embeds one (firmware banners, kernel release,
-rootfs file), unpacks the overlay at `/prd`, runs the product map and
-reports each requirement as a LAVA test case. For boards whose test
+rootfs file), unpacks the overlay at `/prd`, runs the products and
+reports each row as a LAVA test case. For boards whose test
 image replaces the lab's stock firmware (`lava.backstop`), a second job
 restores the stock image on the same device: submit it right after the
 test job (needs `STOCK_IMAGE_URL`, `STOCK_IMAGE_DIR`,
 `STOCK_UEFI_VERSION`, optional `STOCK_ARTIFACT_HEADER`).
 
-`python3 tools/selftest.py` checks the runner rules and the maps; run it
-after editing a test, a profile or a map.
+`python3 tools/selftest.py` checks the runner rules and the products;
+run it after editing a test, a profile or a product.
 
 ## Virtual board and CI
 
@@ -132,21 +135,34 @@ anything that needs the drivers, which shows the tests are not vacuous.
 for every push; `scrub.yml` runs the scrub, the generic names gate and
 the selftest.
 
-## Generic product and matrix
+## Products
 
-`products/generic.yaml` holds one requirement per test with arguments
-any board can answer, and sets `missing: skip`: there a missing
-interface is a skip ("interface absent"), since the question is which
-interfaces work. A product map that demands a feature (`products/
-eliza.yaml`) keeps the default, where a missing interface is a fail
-unless the board profile lists the hardware as absent. Run the generic
-product on several boards and tabulate it:
+`products/generic.yaml` has one row per test and arguments on the
+standard interfaces (DRM/KMS with writeback, Wayland/EGL, V4L2 codecs
+and capture, the media controller, ALSA, GStreamer, libcamera, TEE,
+TPM, thermal). `products/qcom.yaml` has the Qualcomm-specific rows:
+remote processors and DSP restart, FastRPC, AudioReach graphs and
+calibration, compress offload, vendor display properties and
+modifiers, the downstream GL driver, CamX, low power islands, features
+no standard interface exposes, and the quality KPIs. Rows say what to
+measure; a board profile gives the numbers that board must reach
+(`targets`, below). CI runs `generic.yaml` on the virtual board;
+both run in LAVA on the real boards:
 
-    python3 tools/matrix.py --product products/generic.yaml EVK=<job> RB3=<job> VM=vm-out/results.jsonl
+    python3 tools/matrix.py --product products/generic.yaml --product products/qcom.yaml \
+        EVK=<job> RB3=<job> VM=vm-out/results.jsonl
+
+Both set `missing: skip`: a missing interface is a skip ("interface
+absent"), since the matrix asks which interfaces work. Row IDs are
+never reused.
+
+A product map that demands a feature (`products/eliza.yaml`) keeps the
+default, where a missing interface is a fail unless the board profile
+lists the hardware as absent.
 
 The current matrix is in `results/matrix.md`.
 Totals of the current run (pass/partial/fail/skip of 72, recorded before
-GCA-006..010, the CamX tests, were added):
+the CamX tests, now QCA-001..005, were added):
 
 | platform | pass | partial | fail | skip |
 |---|---|---|---|---|
@@ -188,8 +204,8 @@ Copy a profile in `boards/` and fill in what applies:
   `qti-cam-server`) and the `cameras` the CamX stack exposes (`id`,
   `width`, `height`, `fps`, `format`), used by the `camx` module.
 - `modules`: optional vendor modules (`audioreach`, `camx`).
-- `targets`: numbers this board must reach, by requirement ID, in the
-  target syntax below; they replace the requirement's own target.
+- `targets`: numbers this board must reach, by row ID, in the target
+  syntax below; they replace the row's own target.
 - `run_last`: tests that leave the device changed for the rest of the
   run (a test name, optionally with `key=value` arguments, for example
   `audio.case case=compress`); requirements using them run after the
@@ -200,28 +216,27 @@ Copy a profile in `boards/` and fill in what applies:
   `tpm`, ...), each
   with what would enable the tests.
 
-Nothing else changes: the same product map runs on the new board.
+Nothing else changes: the same rows run on the new board.
 
-## Adding a product
+## Adding rows
 
-Write `products/<product>.yaml`: neutral requirement IDs (no internal
-tracker IDs), each with a `title`, a `test` and its `args` (or `tests`,
-a list, when one requirement needs several), and a `target` on the
-test's measurements when the requirement states one:
+A row in `products/generic.yaml` (standard interface) or
+`products/qcom.yaml` (Qualcomm-specific) has a `title`, a `test` and
+its `args` (or `tests`, a list, when one requirement needs several),
+and optionally a `target` on the test's measurements that holds on
+every board:
 
-    DSP-003:
-      title: "Color Depth"
+    GDS-023:
+      title: "Output colour depth (max bpc)"
       test: display.connector_property
-      args: {connector: primary, names: [max bpc], feature: Colour depth, commit: true}
-      target: {max_bpc: 10}
+      args: {commit: true, connector: primary, feature: Colour depth, names: [max bpc]}
 
-`missing: skip` at the top makes a missing interface a skip instead of
-a fail (see above). A target value is a minimum (`10`), a range (`{min: 5, max: 9}`), an
+A target value is a minimum (`10`), a range (`{min: 5, max: 9}`), an
 exact value (`{eq: 10}`) or a list the measured list must contain;
-`none` marks a requirement without a number. A requirement with
-several `tests` fails when any of them fails, passes when all pass,
-skips when all skip, and is partial otherwise. `areas` maps ID prefixes to
-the `--area` names. Run `tools/selftest.py` to check the map.
+`none` marks a requirement without a number. A row with several
+`tests` fails when any of them fails, passes when all pass, skips when
+all skip, and is partial otherwise. `areas` maps ID prefixes to the
+`--area` names. Run `tools/selftest.py` to check the rows.
 
 ## Licensing
 

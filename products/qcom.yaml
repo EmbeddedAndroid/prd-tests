@@ -1,0 +1,43 @@
+# Qualcomm product: interfaces and features only Qualcomm stacks have
+# (remote processors and DSP restart, FastRPC, AudioReach/PAL graphs
+# and calibration, compress offload, vendor display properties and
+# modifiers, the downstream GL driver, CamX, low power islands), features
+# no standard Linux interface exposes, and the quality KPIs. Rows say
+# what to measure; numbers a SoC or board must reach go in the board
+# profile (targets.<ID>). The same rows run on every Qualcomm board, on
+# real boards only (LAVA), next to products/generic.yaml.
+product: qcom
+title: Qualcomm-specific interfaces and KPIs
+missing: skip
+areas: {QDS: display, QAU: audio, QVI: video, QCA: camera, QPL: platform}
+requirements:
+  QAU-001:
+    title: "Compress offload (MP3)"
+    test: audio.compress_codec
+    args: {codec: MP3}
+  QAU-002:
+    title: "Audio DSP restart"
+    test: audio.ssr
+  QAU-003:
+    title: "Analog quality KPI"
+    test: audio.quality
+    args: {what: playback THD+N}
+  QCA-001:
+    title: "CamX camera driver"
+    test: camx.kmd
+  QCA-002:
+    title: "CamX camera service"
+    test: camx.service
+    target: {restarts: {max: 0}}
+  QCA-003:
+    title: "CamX preview"
+    test: camx.preview
+  QCA-004:
+    title: "CamX capture"
+    test: camx.capture
+  QCA-005:
+    title: "CamX concurrent cameras"
+    test: camx.concurrent
+  QPL-001:
+    title: "Remote processors running"
+    test: platform.remoteproc
