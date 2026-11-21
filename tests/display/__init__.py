@@ -1195,8 +1195,86 @@ def t_clone_writeback(env, connector='primary'):
         return ('fail', 'the writeback connector shares no CRTC with %s (writeback CRTCs %s): '
                 'no clone writeback' % (d.ctype(connector), wbc))
     k = d.need_connected(connector)
-    return 'partial', 'writeback and %s share CRTCs %s; clone capture not exercised' % (
-        k['name'], shared)
+    crtc = next((c for c in d.card.possible_crtcs(k) if c in shared), None)
+    if crtc is None:
+        return 'fail', 'no CRTC drives both %s and the writeback connector' % k['name']
+    mode = pick_mode(k, 'preferred')
+    for tries in range(1, 4):
+        r = clone_once(d, k, crtc, mode)
+        if r:
+            break
+    else:
+        return 'fail', ('%s lit at %dx%d and the writeback fence signalled 3 times, but every '
+                        'capture still holds the fill pattern' % (k['name'], mode.hdisplay, mode.vdisplay))
+    if tries > 1:
+        r = (r[0], r[1] + '; %d empty capture(s) retried' % (tries - 1)) + r[2:]
+    return r
+
+
+def clone_once(d, k, crtc, mode):
+    """One commit lighting connector k and the writeback connector from
+    crtc; the result, or None when the capture was left empty."""
+    w, h = mode.hdisplay, mode.vdisplay
+    c = d.card
+    cols = [RED, GREEN, BLUE, WHITE]
+    fb = fb_quadrants(c, w, h, cols)
+    mb = c.create_blob(mode.raw)
+    cap = c.dumb(w, h, 32)
+    cap['map'][:] = b'\x5a' * cap['size']
+    capfb = c.addfb2(w, h, XR24, [cap['handle']], [cap['pitch']], [0])
+    pls = d.planes_for(crtc)
+    pl = next((p for p in pls if p['type'] == 'Primary'), pls[0])
+    cp, kp, wp = d.crtc_props[crtc], d.conn_props[k['id']], d.conn_props[d.wb['id']]
+    fence = kms.ctypes.c_int32(-1)
+    req = {crtc: crtc_req(d, crtc, mb),
+           k['id']: {kp['CRTC_ID'][0]: crtc},
+           d.wb['id']: {wp['CRTC_ID'][0]: crtc, wp['WRITEBACK_FB_ID'][0]: capfb,
+                        wp['WRITEBACK_OUT_FENCE_PTR'][0]: kms.ctypes.addressof(fence)},
+           pl['id']: plane_req(pl, crtc, Layer(fb[0], w, h, (0, 0, w, h)), c)}
+    for p in d.planes:
+        pc = c.props(p['id'], kms.OBJ_PLANE).get('CRTC_ID', (0, 0))
+        if pc[1] == crtc and p['id'] != pl['id']:
+            req[p['id']] = {p['props']['FB_ID'][0]: 0, pc[0]: 0}
+    err, got = None, None
+    try:
+        c.atomic(req, kms.ALLOW_MODESET)
+        st = kms.wait_fence(fence.value, 2.0)
+        if st != 1:
+            err = 'writeback fence %s' % ('did not signal within 2 s' if st == 0 else
+                                          'missing' if st is None else 'signalled with error %d' % st)
+        else:
+            got = sample(cap, [(w // 4, h // 4), (3 * w // 4, h // 4), (w // 4, 3 * h // 4),
+                               (3 * w // 4, 3 * h // 4)])
+        time.sleep(1.0)
+        ls = c.props(k['id'], kms.OBJ_CONNECTOR).get('link-status')
+        if err is None and ls and c.enum_name(ls) == 'Bad':
+            err = 'clone commit accepted but %s link-status is Bad' % k['name']
+        if err is None and not c.props(crtc, kms.OBJ_CRTC)['ACTIVE'][1]:
+            err = 'the CRTC went inactive after the clone capture'
+    except kms.DrmError as e:
+        err = 'clone commit refused: %s' % e
+    off = {crtc: {cp['MODE_ID'][0]: 0, cp['ACTIVE'][0]: 0}, k['id']: {kp['CRTC_ID'][0]: 0},
+           d.wb['id']: {wp['CRTC_ID'][0]: 0},
+           pl['id']: {pl['props']['FB_ID'][0]: 0, pl['props']['CRTC_ID'][0]: 0}}
+    try:
+        c.atomic(off, kms.ALLOW_MODESET)
+    except kms.DrmError:
+        pass
+    c.rmfb(capfb)
+    free(c, fb)
+    c.destroy_blob(mb)
+    if err:
+        c.free_dumb(cap)
+        return 'fail', '%s at %dx%d on CRTC %d: %s' % (k['name'], w, h, crtc, err)
+    empty = untouched(cap, w, h)
+    c.free_dumb(cap)
+    if empty:
+        return None
+    ok = all(near(g, e) for g, e in zip(got, cols))
+    return ('pass' if ok else 'fail',
+            '%s at %dx%d and writeback on CRTC %d in one commit: quadrants %s (expected red, '
+            'green, blue, white); link-status good, CRTC still active' % (k['name'], w, h, crtc, got),
+            {'width': w, 'height': h})
 
 
 @test('display.multi')
