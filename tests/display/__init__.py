@@ -1270,13 +1270,15 @@ def t_wayland_gl(env, seconds=5, renderer=None, version=None,
     if st != 'active':
         return 'fail', 'compositor unit %s is %s after start; journal: %s' % (
             env.ctx('display').unit, st, log.replace('\n', ' | ')[-600:])
-    for i in range(20):         # a compositor can take seconds to open its socket
+    # a compositor can take tens of seconds to open its socket: 39 s for
+    # Weston on llvmpipe in an emulated arm64 guest
+    for i in range(60):
         e, sock = wl_env(env)
         if os.path.exists(sock):
             break
         time.sleep(1)
     else:
-        return 'fail', 'compositor active but no Wayland socket at %s after 20 s' % sock
+        return 'fail', 'compositor active but no Wayland socket at %s after 60 s' % sock
     if not have('eglinfo'):
         raise Missing('eglinfo not on the image: the EGL renderer cannot be read', hw='eglinfo')
     rc, info = sh('%s eglinfo -B -p wayland 2>&1' % e, timeout=20)
