@@ -1179,7 +1179,19 @@ def t_crtc_lut(env, prop='GAMMA_LUT'):
     got = px(cap, 100, 100)
     d.card.free_dumb(cap)
     if near(got, want, 12):
-        return 'pass', '%s applied: (200,100,50) -> %s, expected ~%s' % (prop, got, want)
+        msg = '%s applied: (200,100,50) -> %s, expected ~%s' % (prop, got, want)
+        if prop == 'CTM':
+            return 'pass', msg
+        # a LUT shorter than the advertised size must be refused, not read past its end
+        blob = d.card.create_blob(struct.pack('<HHHH', 0xffff, 0xffff, 0xffff, 0))
+        fb = fb_solid(d.card, WB_W, WB_H, (200, 100, 50))
+        _, err = compose(d, [Layer(fb[0], WB_W, WB_H, (0, 0, WB_W, WB_H))],
+                         crtc_extra={prop: blob}, test_only=True)
+        d.card.destroy_blob(blob)
+        free(d.card, fb)
+        if err is None:
+            return 'fail', '%s; a 1-entry %s was accepted where %s is %d' % (msg, prop, size_prop, n)
+        return 'pass', '%s; a 1-entry %s is refused (%s)' % (msg, prop, err)
     if near(got, (200, 100, 50), 6):
         return ('partial', '%s accepted on the writeback CRTC but the capture at the writeback '
                 'output is unchanged %s; the effect needs a sink capture to observe' % (prop, got))
