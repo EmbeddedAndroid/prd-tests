@@ -19,6 +19,16 @@ product=${2:-products/generic.yaml}
 out=$top/vm-out; [ "$mode" = bare ] && out=$top/vm-out-bare
 rm -rf "$out"; mkdir -p "$out"
 mode_vm=${PRD_VM:-qemu}
+if [ "$mode_vm" = native ]; then
+	miss=
+	for m in vkms vimc vicodec vivid snd-aloop tpm_vtpm_proxy; do
+		modinfo "$m" >/dev/null 2>&1 || miss="$miss $m"
+	done
+	if [ -n "$miss" ]; then
+		echo "run.sh: kernel $(uname -r) has no$miss: run without PRD_VM=native" >&2
+		exit 1
+	fi
+fi
 tpm=$(mktemp -d)
 if [ "$mode_vm" = native ]; then
 	# a desktop session's media daemons hold the cameras and the sound

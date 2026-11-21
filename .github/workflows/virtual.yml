@@ -8,15 +8,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: ubuntu-24.04
-            vm: qemu
-          # no KVM on the arm64 runners: run on the runner's own kernel
-          - runner: ubuntu-24.04-arm
-            vm: native
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
-    env:
-      PRD_VM: ${{ matrix.vm }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4

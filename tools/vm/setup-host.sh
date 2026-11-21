@@ -1,10 +1,11 @@
 #!/bin/sh
 # setup-host.sh: install what tools/vm/run.sh needs on an Ubuntu 24.04
 # host (arm64 or x86_64): QEMU and virtme-ng, Ubuntu's generic kernel with
-# its extra modules (vkms, vimc, vicodec, vivid, snd-aloop) whatever
-# kernel the host itself runs, swtpm, and the user space the tests call.
-# The VM boots that kernel on the host's root file system, so everything
-# is installed here.
+# its extra modules (vkms, vimc, vicodec, vivid, snd-aloop) for the guest,
+# swtpm, and the user space the tests call. The VM boots that kernel on
+# the host's root file system, so everything is installed here. With
+# PRD_VM=native it also installs the running kernel's extra modules where
+# Ubuntu has them; cloud kernels may have none.
 set -eu
 sudo apt-get update -qq
 case "$(uname -m)" in
@@ -20,8 +21,12 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommen
 	kmod udev busybox-static binutils >/dev/null
 k=$(ls /boot/vmlinuz-*-generic | sort -V | tail -1)
 k=${k#/boot/vmlinuz-}
-# and the extra modules of the running kernel, for the native mode
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
-	"linux-modules-extra-$k" "linux-modules-extra-$(uname -r)" >/dev/null
+	"linux-modules-extra-$k" >/dev/null
 # virtme-ng reads the kernel image, which Ubuntu installs root-only
 sudo chmod a+r /boot/vmlinuz-* 2>/dev/null || true
+if [ "${PRD_VM:-qemu}" = native ] &&
+	apt-cache show "linux-modules-extra-$(uname -r)" >/dev/null 2>&1; then
+	sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+		"linux-modules-extra-$(uname -r)" >/dev/null
+fi

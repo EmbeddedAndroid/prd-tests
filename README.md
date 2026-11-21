@@ -118,17 +118,19 @@ capture device), snd-aloop (an ALSA loopback card), a software TPM
     sudo sh tools/vm/run.sh bare       # same suite, no virtual drivers
     python3 tools/vm/expect.py vm-out-bare bare
 
-With KVM, `run.sh` boots Ubuntu's generic kernel in QEMU (virtme-ng) on
-the host root file system; without KVM (arm64 cloud VMs and CI runners,
-which are QEMU/KVM guests themselves) it loads the same drivers into the
-host kernel, because an emulated guest is too slow. The verdict of a
-full run: every requirement passes, is partial, or skips with the
-board's reason, unless `boards/virtual.yaml` lists it under `known_fail`
-with the reason (features vkms and snd-aloop do not have). A bare run
-must not pass anything that needs the drivers, which shows the tests are
-not vacuous. `.github/workflows/virtual.yml` runs both on x86_64 and
-arm64 runners for every push; `scrub.yml` runs the scrub, the generic
-names gate and the selftest.
+`run.sh` boots Ubuntu's generic kernel in QEMU (virtme-ng) on the host
+root file system, with KVM where the host has it; an arm64 host without
+KVM (cloud VMs and CI runners) emulates the guest. `PRD_VM=native` (set
+for setup-host.sh too) loads the drivers into the host kernel instead,
+on a throwaway VM whose kernel has them; run.sh names any it lacks, as
+Ubuntu's cloud kernels may. The verdict of a full run: every requirement
+passes, is partial, or skips with the board's reason, unless
+`boards/virtual.yaml` lists it under `known_fail` with the reason
+(features vkms and snd-aloop do not have). A bare run must not pass
+anything that needs the drivers, which shows the tests are not vacuous.
+`.github/workflows/virtual.yml` runs both on x86_64 and arm64 runners
+for every push; `scrub.yml` runs the scrub, the generic names gate and
+the selftest.
 
 ## Generic product and matrix
 
