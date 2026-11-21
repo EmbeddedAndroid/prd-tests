@@ -1181,9 +1181,17 @@ def t_modifiers(env, vendor=None):
             {'modifiers': sorted(seen)})
 
 
+def ctm_blob(card, m):
+    """CTM blob of a row-major 3x3 matrix: S31.32 sign-magnitude per the KMS uAPI."""
+    v = [(1 << 63 if x < 0 else 0) | round(abs(x) * (1 << 32)) for x in m]
+    return card.create_blob(struct.pack('<9Q', *v))
+
+
 @wbtest('display.crtc_lut')
-def t_crtc_lut(env, prop='GAMMA_LUT'):
-    """CRTC colour management (GAMMA_LUT, DEGAMMA_LUT, CTM) applied to the output"""
+def t_crtc_lut(env, prop='GAMMA_LUT', ctm=None, want=None, uncovered=None):
+    """CRTC colour management (GAMMA_LUT, DEGAMMA_LUT, CTM) applied to the output;
+    ctm and want give another CTM and its expected colour, uncovered names what
+    the requirement asks beyond it"""
     d = K(env)
     crtc = d.wb_crtc()
     cp = d.crtc_props[crtc]
@@ -1192,9 +1200,8 @@ def t_crtc_lut(env, prop='GAMMA_LUT'):
     d.need_wb()
     size_prop = {'GAMMA_LUT': 'GAMMA_LUT_SIZE', 'DEGAMMA_LUT': 'DEGAMMA_LUT_SIZE'}.get(prop)
     if prop == 'CTM':
-        one = 1 << 32           # S31.32: swap red and blue
-        blob = d.card.create_blob(struct.pack('<9Q', 0, 0, one, 0, one, 0, one, 0, 0))
-        want = (50, 100, 200)
+        blob = ctm_blob(d.card, ctm or (0, 0, 1, 0, 1, 0, 1, 0, 0))   # default: swap red and blue
+        want = tuple(want) if want else (50, 100, 200)
     else:
         n = cp[size_prop][1] if size_prop in cp else 0
         if not n:
@@ -1214,7 +1221,7 @@ def t_crtc_lut(env, prop='GAMMA_LUT'):
     if near(got, want, 12):
         msg = '%s applied: (200,100,50) -> %s, expected ~%s' % (prop, got, want)
         if prop == 'CTM':
-            return 'pass', msg
+            return ('partial', '%s; not covered: %s' % (msg, uncovered)) if uncovered else ('pass', msg)
         # a LUT shorter than the size may be refused or sub-sampled (KMS uAPI);
         # black to white sub-samples to identity, a read past its end does not
         blob = d.card.create_blob(struct.pack('<8H', 0, 0, 0, 0, 0xffff, 0xffff, 0xffff, 0))

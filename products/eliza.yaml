@@ -109,8 +109,13 @@ requirements:
     test: display.writeback
   DSP-024:
     title: "Picture Control Block (DSPP)"
-    test: display.property
-    args: {feature: Picture control block (CRTC colour management), names: [CTM, GAMMA_LUT, DEGAMMA_LUT], obj: crtc}
+    test: display.crtc_lut
+    # saturation 0 as a CTM (BT.709 luma rows): (200,100,50) -> grey 118
+    args:
+      prop: CTM
+      ctm: [0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722]
+      want: [118, 118, 118]
+      uncovered: "hue, intensity and contrast controls (KMS has no HSIC property; DSP-045)"
   DSP-025:
     title: "Arbitrary alignment of video/graphic layers"
     test: display.position
