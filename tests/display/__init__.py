@@ -937,15 +937,22 @@ def fb_any(card, f, w=64, h=64):
 PACKED_YUV = {'YUYV': (0, 1, 2, 3), 'YVYU': (0, 3, 2, 1), 'UYVY': (1, 0, 3, 2), 'VYUY': (3, 0, 1, 2)}
 
 
-def packed_check(d, fb, buf, n):
-    """Scan out a packed 4:2:2 buffer of CSC_RGB (BT.601 limited, the
-    default encoding) and check its colour: None, or the error."""
+def packed_check(d, pl, fb, buf, n):
+    """Scan out a packed 4:2:2 buffer of CSC_RGB in BT.601 limited range
+    on plane pl and check its colour: None, or the error."""
     y, u, v = rgb_to_ycbcr(CSC_RGB, 'BT.601', False)
+    props = {}
+    for k, want in (('COLOR_ENCODING', 'bt601'), ('COLOR_RANGE', 'limited')):
+        if k in pl['props']:
+            en = d.card.prop_info(pl['props'][k][0])['enums']
+            props[k] = next((v_ for e, v_ in en.items() if want in e.replace('.', '').lower()), None)
+            if props[k] is None:
+                return 'plane offers no %s %s' % (k, want)
     grp = bytes((y, u, y, v)[i] for i in PACKED_YUV[n])
     for r in range(64):
         o = r * buf['pitch']
         buf['map'][o:o + 128] = grp * 32
-    cap, err = compose(d, [Layer(fb, 64, 64, (0, 0, 64, 64))])
+    cap, err = compose(d, [Layer(fb, 64, 64, (0, 0, 64, 64), props=props)], planes=[pl])
     if err:
         return err
     got = px(cap, 32, 32)
@@ -973,7 +980,7 @@ def t_formats(env):
             continue
         _, err = compose(d, [Layer(fb, 64, 64, (0, 0, 64, 64))], test_only=True)
         if not err and n in PACKED_YUV:
-            err = packed_check(d, fb, buf, n)
+            err = packed_check(d, pl, fb, buf, n)
         (bad.append('%s %s' % (n, err)) if err else ok_l.append(n))
         free(d.card, (fb, buf))
     reason = '%d formats commit (%s)' % (len(ok_l), ' '.join(ok_l))
