@@ -861,7 +861,8 @@ def t_csc(env):
                     missing.append(label)
                     continue
                 props = {'COLOR_ENCODING': ee[en], 'COLOR_RANGE': rr[rn]}
-            elif label != 'BT.601 limited':
+            elif label not in ('BT.601 limited', 'BT.709 limited'):
+                # without the properties BT.709 shows what the default matrix does to it
                 continue
             tried.append(label)
             y, u, v = rgb_to_ycbcr(CSC_RGB, name, full)
