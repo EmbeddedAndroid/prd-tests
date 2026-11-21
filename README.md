@@ -182,21 +182,19 @@ status and reason as running the requirements themselves
 log a composite reason broken by a console line inside its " || "
 separator is reported "unparsed".
 
-The current matrix is in `results/matrix.md`.
-Totals of the current run (pass/partial/fail/skip of 72, recorded before
-the CamX tests, now QCA-001..005, were added):
+The current matrix is in `results/matrix.md`; totals per platform:
 
-| platform | pass | partial | fail | skip |
-|---|---|---|---|---|
-| virtual x86_64 (QEMU + KVM) | 35 | 5 | 12 (all `known_fail`) | 20 |
-| virtual arm64 (native) | 35 | 5 | 12 (all `known_fail`) | 20 |
-| virtual, no drivers | 2 | 0 | 3 | 67 |
-| Eliza EVK | 31 | 5 | 16 | 20 |
-| RB3 Gen 2 | 36 | 5 | 3 | 28 |
-| IQ-9075 EVK | 36 | 5 | 4 | 27 |
-| IQ-8275 EVK | 36 | 4 | 4 | 28 |
-| Glymur CRD | 37 | 4 | 4 | 27 |
-| VENTUNO Q | 30 | 4 | 5 | 33 |
+| platform | generic (128): pass / partial / fail / skip | qcom (79): pass / partial / fail / skip |
+|---|---|---|
+| virtual x86_64 | 39 / 9 / 23 / 57 | not run |
+| virtual arm64 | 39 / 9 / 23 / 57 | not run |
+| no drivers | 2 / 1 / 4 / 121 | not run |
+| Eliza EVK | 56 / 5 / 24 / 43 | 3 / 9 / 48 / 19 |
+| RB3 Gen 2 | 50 / 8 / 10 / 60 | 1 / 3 / 46 / 29 |
+| IQ-9075 EVK | 48 / 6 / 15 / 59 | 2 / 7 / 47 / 23 |
+| IQ-8275 EVK | 51 / 6 / 12 / 59 | 2 / 2 / 45 / 30 |
+| Glymur CRD | 54 / 6 / 11 / 57 | 2 / 5 / 42 / 30 |
+| VENTUNO Q | 36 / 17 / 14 / 61 | 1 / 2 / 45 / 31 |
 
 ## Adding a board
 
