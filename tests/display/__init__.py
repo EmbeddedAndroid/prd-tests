@@ -917,6 +917,9 @@ def fb_any(card, f, w=64, h=64):
         rows = h * 2 if n in ('NV16', 'NV61') else h * 3 // 2
         d = card.dumb(w, rows, 16 if n == 'P010' else 8)
         return card.addfb2(w, h, f, [d['handle']] * 2, [d['pitch']] * 2, [0, d['pitch'] * h]), d
+    if n in ('YUYV', 'YVYU', 'UYVY', 'VYUY'):
+        d = card.dumb(w, h, 16)
+        return card.addfb2(w, h, f, [d['handle']], [d['pitch']], [0]), d
     if n in ('YU12', 'YV12'):
         d = card.dumb(w, h * 3 // 2, 8)
         p = d['pitch']
