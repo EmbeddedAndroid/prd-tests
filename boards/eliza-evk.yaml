@@ -184,6 +184,12 @@ run_last:
 platform:
   sleep_stats: /sys/kernel/debug/qcom_stats
 
+# Numbers this board must reach, by product row (they replace the row's
+# own target)
+targets:
+  GDS-023: {max_bpc: 10}
+  GDS-037: {max_bpc: 10}
+
 # Hardware this board does not have, with what would enable the tests
 # that need it. A test that finds the interface missing reports skip
 # with this reason instead of fail.

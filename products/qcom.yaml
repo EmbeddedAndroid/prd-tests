@@ -11,6 +11,78 @@ title: Qualcomm-specific interfaces and KPIs
 missing: skip
 areas: {QDS: display, QAU: audio, QVI: video, QCA: camera, QPL: platform}
 requirements:
+  QDS-001:
+    title: "Wayland compositor with EGL on a GL driver that is not Mesa"
+    test: display.wayland_gl
+    args: {version: '^(?!.*Mesa).+'}
+  QDS-002:
+    title: "Dithering property"
+    test: display.property
+    args: {feature: Dithering, names: [DITHER, dither], obj: crtc}
+  QDS-003:
+    title: "Memory colour"
+    test: platform.no_interface
+    args: {feature: Memory colour, interface: the DRM colour management API has no memory colour (hue/saturation zone) property}
+  QDS-004:
+    title: "Display inventory: maximum resolution per voltage corner"
+    test: display.summary
+    args: {what: Maximum resolution per voltage corner}
+  QDS-005:
+    title: "Vendor framebuffer modifiers (QCOM)"
+    test: display.modifiers
+    args: {vendor: QCOM}
+  QDS-006:
+    title: "Content adaptive backlight control"
+    test: platform.no_interface
+    args: {feature: Content adaptive backlight control, interface: no KMS or backlight class property for content adaptive backlight control}
+  QDS-007:
+    title: "Gamut mapping (3D LUT) property"
+    test: display.property
+    args: {feature: Gamut mapping (3D LUT), names: [GAMUT_3DLUT, LUT3D, 3D_LUT], obj: crtc}
+  QDS-008:
+    title: "Colour block dither property"
+    test: display.property
+    args: {feature: Colour block dither, names: [DITHER, dither], obj: crtc}
+  QDS-009:
+    title: "Picture adjustment (hue, saturation, value, contrast)"
+    test: platform.no_interface
+    args: {feature: 'Picture adjustment (hue, saturation, value, contrast)', interface: the DRM colour management API has no picture adjustment property}
+  QDS-010:
+    title: "Destination scaler and sharpening"
+    test: platform.no_interface
+    args: {feature: Destination scaler and sharpening, interface: KMS has no destination scaler or sharpening property}
+  QDS-011:
+    title: "Display panel calibration"
+    test: platform.no_interface
+    args: {feature: Display panel calibration, interface: no standard Linux interface for panel calibration}
+  QDS-012:
+    title: "Display tuning"
+    test: platform.no_interface
+    args: {feature: Display tuning, interface: no standard Linux interface for display tuning}
+  QDS-013:
+    title: "Source sharpening property"
+    test: display.property
+    args: {feature: Source sharpening, names: [SHARPNESS, sharpness], obj: plane}
+  QDS-014:
+    title: "Rounded corners and cut-outs"
+    test: platform.no_interface
+    args: {feature: Rounded corners and cut-outs, interface: KMS has no rounded corner or cut-out mask property}
+  QDS-015:
+    title: "ROI based concurrent writeback"
+    test: platform.no_interface
+    args: {feature: ROI based concurrent writeback, interface: the KMS writeback connector captures the full frame; it has no region of interest property}
+  QDS-016:
+    title: "Display engine video playback enhancements"
+    test: platform.no_interface
+    args: {feature: Display engine video playback enhancements, interface: KMS has no video enhancement property}
+  QDS-017:
+    title: "Histogram property"
+    test: display.property
+    args: {feature: Histogram, names: [HISTOGRAM, histogram], obj: crtc}
+  QDS-018:
+    title: "Power and performance composition policy"
+    test: platform.no_interface
+    args: {feature: Power and performance composition policy, interface: a compositor policy with no defined target; Weston has no display engine aware policy}
   QAU-001:
     title: "Compress offload (MP3)"
     test: audio.compress_codec
@@ -22,6 +94,204 @@ requirements:
     title: "Analog quality KPI"
     test: audio.quality
     args: {what: playback THD+N}
+  QAU-004:
+    title: "Multiband DRC"
+    test: audio.controls
+    args: {feature: Multiband DRC, patterns: [MBDRC, 'multi.?band']}
+  QAU-005:
+    title: "AudioReach usecase: Mono noise suppression"
+    test: audioreach.usecase
+    args: {feature: Mono noise suppression, pattern: ECNS|_NS_}
+  QAU-006:
+    title: "Dynamic range control"
+    test: audio.controls
+    args: {feature: Dynamic range control, patterns: [\bDRC\b]}
+  QAU-007:
+    title: "AudioReach usecase: Dual-mic ECNS"
+    test: audioreach.usecase
+    args: {feature: Dual-mic ECNS, pattern: 'DUAL_?MIC_?ECNS|ECNS_?DUAL'}
+  QAU-008:
+    title: "AudioReach usecase: Multi-mic ECNS"
+    test: audioreach.usecase
+    args: {feature: Multi-mic ECNS, pattern: '(MULTI|TRI|QUAD)_?MIC_?ECNS'}
+  QAU-009:
+    title: "Compress offload playback (shell case)"
+    test: audio.case
+    args: {case: compress}
+  QAU-010:
+    title: "Audio calibration database (ACDB)"
+    test: audioreach.acdb
+  QAU-011:
+    title: "AudioReach usecase: Single-mic ECNS"
+    test: audioreach.usecase
+    args: {feature: Single-mic ECNS, pattern: ECNS}
+  QAU-012:
+    title: "QACT: calibration transport"
+    test: audioreach.qact
+  QAU-013:
+    title: "Compress offload (ALAC)"
+    test: audio.compress_codec
+    args: {codec: ALAC}
+  QAU-014:
+    title: "Speaker protection (VI feedback)"
+    test: audio.controls
+    args: {feature: Speaker protection (VI feedback), patterns: [VISENSE, 'VI ?SENSE']}
+  QAU-015:
+    title: "Audio quality KPI: playback PEAQ"
+    test: audio.quality
+    args: {what: playback PEAQ}
+  QAU-016:
+    title: "Audio quality KPI: playback noise"
+    test: audio.quality
+    args: {what: playback noise}
+  QAU-017:
+    title: "Audio quality KPI: playback dynamic range"
+    test: audio.quality
+    args: {what: playback dynamic range}
+  QAU-018:
+    title: "Audio quality KPI: playback SNR"
+    test: audio.quality
+    args: {what: playback SNR}
+  QAU-019:
+    title: "Audio quality KPI: playback click and pop"
+    test: audio.quality
+    args: {what: playback click and pop}
+  QAU-020:
+    title: "Audio quality KPI: playback maximum output power"
+    test: audio.quality
+    args: {what: playback maximum output power}
+  QAU-021:
+    title: "Audio quality KPI: playback frequency response"
+    test: audio.quality
+    args: {what: playback frequency response}
+  QAU-022:
+    title: "Audio quality KPI: record THD+N"
+    test: audio.quality
+    args: {what: record THD+N}
+  QAU-023:
+    title: "Audio quality KPI: record SNR"
+    test: audio.quality
+    args: {what: record SNR}
+  QAU-024:
+    title: "Audio quality KPI: record click and pop"
+    test: audio.quality
+    args: {what: record click and pop}
+  QAU-025:
+    title: "Audio quality KPI: record frequency response"
+    test: audio.quality
+    args: {what: record frequency response}
+  QAU-026:
+    title: "Compress offload (AAC-LC)"
+    test: audio.compress_codec
+    args: {codec: AAC, label: AAC-LC}
+  QAU-027:
+    title: "Compress offload (HE-AAC v1)"
+    test: audio.compress_codec
+    args: {codec: AAC, label: HE-AAC v1}
+  QAU-028:
+    title: "Compress offload (HE-AAC v2)"
+    test: audio.compress_codec
+    args: {codec: AAC, label: HE-AAC v2}
+  QAU-029:
+    title: "Compress offload (AAC-ELD)"
+    test: audio.compress_codec
+    args: {codec: AAC, label: AAC-ELD}
+  QAU-030:
+    title: "Low power statistics: island mode"
+    test: platform.sleep_stat
+    args: {pattern: island}
+  QAU-031:
+    title: "Compress offload (Ogg Vorbis)"
+    test: audio.compress_codec
+    args: {codec: VORBIS, label: Ogg Vorbis}
+  QAU-032:
+    title: "Limiter"
+    test: audio.controls
+    args: {feature: Limiter, patterns: [limiter]}
+  QAU-033:
+    title: "IIR filter"
+    test: audio.controls
+    args: {feature: IIR filter, patterns: [\bIIR]}
+  QAU-034:
+    title: "FastRPC to the audio DSP (shell case)"
+    test: audio.case
+    args: {case: fastrpc}
+  QAU-035:
+    title: "QACT: Real time data and resource monitoring"
+    test: audioreach.qact
+    args: {feature: Real time data and resource monitoring}
+  QAU-036:
+    title: "Centralised protection system"
+    test: audio.controls
+    args: {feature: Centralised protection system, patterns: [CPS, protect]}
+  QAU-037:
+    title: "Echo reference"
+    test: audio.controls
+    args: {feature: Echo reference, patterns: ['EC_?REF', ECHO, REFERENCE]}
+  QAU-038:
+    title: "Audio DSP firmware packaged"
+    test: platform.firmware_packaged
+    args: {paths: [/lib/firmware/qcom/*/*adsp*, /lib/firmware/qcom/*/*/*adsp*, /lib/firmware/qcom/*/*tplg*, /lib/firmware/qcom/*/*/*tplg*]}
+  QVI-001:
+    title: "Wi-Fi Display back channel (source)"
+    test: platform.no_interface
+    args: {feature: Wi-Fi Display back channel (source), interface: no Wi-Fi Display (Miracast) session manager on the image, look: [/usr/bin/*wfd*, /usr/lib/*wfd*, /usr/bin/*miracast*]}
+  QVI-002:
+    title: "Wi-Fi Display back channel (sink)"
+    test: platform.no_interface
+    args: {feature: Wi-Fi Display back channel (sink), interface: no Wi-Fi Display (Miracast) session manager on the image, look: [/usr/bin/*wfd*, /usr/lib/*wfd*, /usr/bin/*miracast*]}
+  QVI-003:
+    title: "Wi-Fi Display sink"
+    test: platform.no_interface
+    args: {feature: Wi-Fi Display sink, interface: no Wi-Fi Display (Miracast) session manager on the image, look: [/usr/bin/*wfd*, /usr/lib/*wfd*, /usr/bin/*miracast*]}
+  QVI-004:
+    title: "RTCP in a Wi-Fi Display session"
+    test: platform.no_interface
+    args: {feature: RTCP in a Wi-Fi Display session, interface: no Wi-Fi Display (Miracast) session manager on the image, look: [/usr/bin/*wfd*, /usr/lib/*wfd*, /usr/bin/*miracast*]}
+  QVI-005:
+    title: "Region of interest encoding"
+    test: platform.no_interface
+    args: {feature: Region of interest encoding, interface: V4L2 has no region of interest QP control upstream}
+  QVI-006:
+    title: "Wi-Fi Display TCP/UDP transport switching"
+    test: platform.no_interface
+    args: {feature: Wi-Fi Display TCP/UDP transport switching, interface: no Wi-Fi Display (Miracast) session manager on the image, look: [/usr/bin/*wfd*, /usr/lib/*wfd*, /usr/bin/*miracast*]}
+  QVI-007:
+    title: "Blur filter"
+    test: platform.no_interface
+    args: {feature: Blur filter, interface: V4L2 has no blur control upstream}
+  QVI-008:
+    title: "Wi-Fi Display source"
+    test: platform.no_interface
+    args: {feature: Wi-Fi Display source, interface: no Wi-Fi Display (Miracast) session manager on the image, look: [/usr/bin/*wfd*, /usr/lib/*wfd*, /usr/bin/*miracast*]}
+  QVI-009:
+    title: "Wi-Fi Display content protection (source)"
+    test: platform.no_interface
+    args: {feature: Wi-Fi Display content protection (source), interface: no Wi-Fi Display (Miracast) session manager on the image, look: [/usr/bin/*wfd*, /usr/lib/*wfd*, /usr/bin/*miracast*]}
+  QVI-010:
+    title: "Wi-Fi Display content protection (sink)"
+    test: platform.no_interface
+    args: {feature: Wi-Fi Display content protection (sink), interface: no Wi-Fi Display (Miracast) session manager on the image, look: [/usr/bin/*wfd*, /usr/lib/*wfd*, /usr/bin/*miracast*]}
+  QVI-011:
+    title: "Wi-Fi Display mDNS discovery"
+    test: platform.no_interface
+    args: {feature: Wi-Fi Display mDNS discovery, interface: no Wi-Fi Display (Miracast) session manager on the image, look: [/usr/bin/*wfd*, /usr/lib/*wfd*, /usr/bin/*miracast*]}
+  QVI-012:
+    title: "Third party certification"
+    test: platform.no_interface
+    args: {feature: Third party certification, interface: 'a certification process, not a device interface'}
+  QVI-013:
+    title: "Secure (protected) video"
+    test: platform.no_interface
+    args: {feature: Secure (protected) video, interface: no protected buffer path in the upstream V4L2 stateful codec API, look: [/dev/dma_heap/*secure*, /dev/dma_heap/*protected*]}
+  QVI-014:
+    title: "Multimedia resource manager"
+    test: platform.no_interface
+    args: {feature: Multimedia resource manager, interface: no cross-device multimedia bandwidth arbiter interface upstream}
+  QVI-015:
+    title: "Fences for video decode"
+    test: platform.no_interface
+    args: {feature: Fences for video decode, interface: V4L2 has no explicit synchronisation (fence) support upstream}
   QCA-001:
     title: "CamX camera driver"
     test: camx.kmd

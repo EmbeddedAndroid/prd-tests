@@ -112,6 +112,94 @@ requirements:
   GDS-030:
     title: "Wayland compositor with EGL"
     test: display.wayland_gl
+  GDS-031:
+    title: "Wayland compositor with EGL on Mesa"
+    test: display.wayland_gl
+    args: {version: Mesa}
+  GDS-032:
+    title: "DSI connector and sink"
+    test: display.connector
+    args: {connector: DSI}
+  GDS-033:
+    title: "Mode set on HDMI, preferred mode"
+    test: display.modeset
+    args: {connector: HDMI-A, mode: preferred}
+  GDS-034:
+    title: "Every HDMI sink mode passes the atomic check"
+    test: display.modes
+    args: {connector: HDMI-A}
+  GDS-035:
+    title: "HDCP on HDMI"
+    test: display.connector_property
+    args: {connector: HDMI-A, feature: HDCP on HDMI, names: [Content Protection]}
+  GDS-036:
+    title: "HDMI output pixel format"
+    test: display.connector_property
+    args: {connector: HDMI-A, feature: HDMI output pixel format, names: [Colorspace, color format, output format]}
+  GDS-037:
+    title: "HDMI colour depth"
+    test: display.connector_property
+    args: {commit: true, connector: HDMI-A, feature: HDMI colour depth, names: [max bpc]}
+  GDS-038:
+    title: "EDID of the HDMI sink"
+    test: display.edid
+    args: {connector: HDMI-A}
+  GDS-039:
+    title: "Hot plug detection on HDMI"
+    test: display.hotplug
+    args: {connector: HDMI-A}
+  GDS-040:
+    title: "Mode set on the primary connector, highest mode"
+    test: display.modeset
+    args: {connector: primary, mode: highest}
+  GDS-041:
+    title: "Three displays at once"
+    test: display.multi
+    args: {n: 3}
+  GDS-042:
+    title: "Colour transform matrix: saturation 0"
+    test: display.crtc_lut
+    args: {prop: CTM, ctm: [0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722, 0.2126, 0.7152, 0.0722], want: [118, 118, 118], uncovered: 'hue, intensity and contrast controls (KMS has no HSIC property; DSP-045)'}
+  GDS-043:
+    title: "Writeback of an active HDMI display"
+    test: display.clone_writeback
+    args: {connector: HDMI-A}
+  GDS-044:
+    title: "Every DisplayPort sink mode passes the atomic check"
+    test: display.modes
+    args: {connector: DP}
+  GDS-045:
+    title: "DisplayPort connector and sink"
+    test: display.connector
+    args: {connector: DP}
+  GDS-046:
+    title: "HDR output metadata property"
+    test: display.property
+    args: {feature: HDR output metadata, names: [HDR_OUTPUT_METADATA], obj: connector}
+  GDS-047:
+    title: "HDR10 over HDMI"
+    test: display.connector_property
+    args: {connector: HDMI-A, feature: HDR10 over HDMI, names: [HDR_OUTPUT_METADATA]}
+  GDS-048:
+    title: "HDCP on DisplayPort"
+    test: display.connector_property
+    args: {connector: DP, feature: HDCP on DisplayPort, names: [Content Protection]}
+  GDS-049:
+    title: "Per-plane colour pipeline (mixed gamut) property"
+    test: display.property
+    args: {feature: Per-plane colour pipeline (mixed gamut), names: [COLOR_PIPELINE], obj: plane}
+  GDS-050:
+    title: "Display inventory: display interface configuration"
+    test: display.summary
+    args: {what: Display interface configuration}
+  GDS-051:
+    title: "DP output format (DisplayPort)"
+    test: display.connector_property
+    args: {connector: DP, feature: DP output format, names: [Colorspace, output format]}
+  GDS-052:
+    title: "HDMI 2.1 optional features"
+    test: display.connector_property
+    args: {connector: HDMI-A, feature: HDMI 2.1 optional features, names: [vrr_capable, content type, HDR_OUTPUT_METADATA]}
   GAU-001:
     title: "Sound card with playback and capture"
     test: audio.cards
@@ -172,6 +260,72 @@ requirements:
     title: "Audio clock against the system clock"
     test: audio.clock_drift
     args: {seconds: 10}
+  GAU-021:
+    title: "Volume steps heard through the loopback (shell case)"
+    test: audio.case
+    args: {case: volume}
+  GAU-022:
+    title: "SoundWire buses and peripherals (shell case)"
+    test: audio.case
+    args: {case: soundwire}
+  GAU-023:
+    title: "TDM/PCM audio interface (shell case)"
+    test: audio.case
+    args: {case: interface-tdm}
+  GAU-024:
+    title: "Capture from the second DMIC pair; capture from the fourth DMIC pair (shell cases)"
+    tests:
+    - {test: audio.case, args: {case: capture-dmic23}}
+    - {test: audio.case, args: {case: capture-dmic67}}
+  GAU-025:
+    title: "Audio clock against the system clock"
+    test: audio.clock_drift
+  GAU-026:
+    title: "Capture device switch while streaming (shell case)"
+    test: audio.case
+    args: {case: device-switch}
+  GAU-027:
+    title: "Pause and resume"
+    test: audio.pause_resume
+  GAU-028:
+    title: "Analog microphone input (shell case)"
+    test: audio.case
+    args: {case: interface-analog-mic}
+  GAU-029:
+    title: "I2C controlled audio device (shell case)"
+    test: audio.case
+    args: {case: interface-i2c}
+  GAU-030:
+    title: "I2S audio interface (shell case)"
+    test: audio.case
+    args: {case: interface-i2s}
+  GAU-031:
+    title: "DisplayPort audio (shell case)"
+    test: audio.case
+    args: {case: interface-dp}
+  GAU-032:
+    title: "Sample formats and rates; loopback tone (shell cases)"
+    tests:
+    - {test: audio.case, args: {case: formats}}
+    - {test: audio.case, args: {case: loopback}}
+  GAU-033:
+    title: "Capture from the second DMIC pair; sample formats and rates (shell cases)"
+    tests:
+    - {test: audio.case, args: {case: capture-dmic23}}
+    - {test: audio.case, args: {case: formats}}
+  GAU-034:
+    title: "Channel upmix (shell case)"
+    test: audio.case
+    args: {case: upmix}
+  GAU-035:
+    title: "Low latency playback and capture (shell case)"
+    test: audio.case
+    args: {case: latency}
+  GAU-036:
+    title: "Sound drivers in tree; audio drivers loaded (shell case)"
+    tests:
+    - {test: platform.in_tree, args: {cls: sound}}
+    - {test: audio.case, args: {case: drivers}}
   GVI-001:
     title: "V4L2 decoder"
     test: video.codec
@@ -207,6 +361,100 @@ requirements:
     title: "GStreamer container and streaming elements"
     test: video.gst_elements
     args: {names: [qtdemux, matroskademux, mpegtsmux, tsdemux, rtpbin]}
+  GVI-010:
+    title: "Two concurrent codec sessions, decode and encode"
+    test: video.concurrent
+    args: {mix: decode+encode, sessions: 2}
+  GVI-011:
+    title: "H264 decoder and conformance vector BA1_Sony_D.jsv"
+    tests:
+    - {test: video.codec, args: {codec: H264, role: decoder}}
+    - {test: video.decode_vector, args: {codec: H264, vector: BA1_Sony_D.jsv}}
+  GVI-012:
+    title: "HEVC decoder and conformance vector AMP_A_Samsung_7.bin"
+    tests:
+    - {test: video.codec, args: {codec: HEVC, role: decoder}}
+    - {test: video.decode_vector, args: {codec: HEVC, vector: AMP_A_Samsung_7.bin}}
+  GVI-013:
+    title: "H264 encoder: encode and decode at 1920x1080"
+    tests:
+    - {test: video.codec, args: {codec: H264, role: encoder}}
+    - {test: video.roundtrip, args: {codec: H264, height: 1080, width: 1920}}
+  GVI-014:
+    title: "HEVC encoder: encode and decode at 1920x1080"
+    tests:
+    - {test: video.codec, args: {codec: HEVC, role: encoder}}
+    - {test: video.roundtrip, args: {codec: HEVC, height: 1080, width: 1920}}
+  GVI-015:
+    title: "Codec controls frame_skip_mode"
+    test: video.controls
+    args: {names: [frame_skip_mode]}
+  GVI-016:
+    title: "Codec controls intra_refresh_period, encoded and decoded"
+    tests:
+    - {test: video.controls, args: {names: [intra_refresh_period]}}
+    - {test: video.roundtrip, args: {codec: H264, controls: 'video_gop_size=1000,intra_refresh_period=10'}}
+  GVI-017:
+    title: "Codec controls ltr_count, frame_ltr_index, use_ltr_frames, encoded and decoded"
+    tests:
+    - {test: video.controls, args: {names: [ltr_count, frame_ltr_index, use_ltr_frames]}}
+    - {test: video.roundtrip, args: {codec: H264, controls: ltr_count=2}}
+  GVI-018:
+    title: "Codec controls slice_partitioning_method, maximum_number_of_mbs_per_slice, encoded and decoded"
+    tests:
+    - {test: video.controls, args: {names: [slice_partitioning_method, maximum_number_of_mbs_per_slice]}}
+    - {test: video.roundtrip, args: {codec: H264, controls: 'slice_partitioning_method=1,maximum_number_of_mbs_per_slice=100'}}
+  GVI-019:
+    title: "Codec controls h264_hierarchical_coding, h264_number_of_hc_layers, encoded and decoded"
+    tests:
+    - {test: video.controls, args: {names: [h264_hierarchical_coding, h264_number_of_hc_layers]}}
+    - {test: video.roundtrip, args: {codec: H264, controls: 'h264_hierarchical_coding=1,h264_number_of_hc_layers=3'}}
+  GVI-020:
+    title: "H264 encode and decode (scaled to 640x360)"
+    test: video.roundtrip
+    args: {caps: 'video/x-h264,width=640,height=360', codec: H264, expect_height: 360, expect_width: 640}
+  GVI-021:
+    title: "VP90 decoder and conformance vector vp90-2-08-tile-4x4.webm"
+    tests:
+    - {test: video.codec, args: {codec: VP90, role: decoder}}
+    - {test: video.decode_vector, args: {codec: VP90, vector: vp90-2-08-tile-4x4.webm}}
+  GVI-022:
+    title: "Codec controls rotate, horizontal_flip, vertical_flip, encoded and decoded"
+    tests:
+    - {test: video.controls, args: {names: [rotate, horizontal_flip, vertical_flip]}}
+    - {test: video.roundtrip, args: {codec: H264, controls: rotate=90, expect_height: 1280, expect_width: 720}}
+  GVI-023:
+    title: "H264 encode and decode (BGRA input)"
+    test: video.roundtrip
+    args: {codec: H264, fmt: BGRA}
+  GVI-024:
+    title: "HEVC encode and decode (P010_10LE input)"
+    test: video.roundtrip
+    args: {codec: HEVC, fmt: P010_10LE}
+  GVI-025:
+    title: "HEVC conformance vector WPP_A_ericsson_MAIN10_2.bit; AV01 conformance vector av1-1-b10-00-quantizer-00.ivf"
+    tests:
+    - {test: video.decode_vector, args: {codec: HEVC, expect_format: P010, vector: WPP_A_ericsson_MAIN10_2.bit}}
+    - {test: video.decode_vector, args: {codec: AV01, vector: av1-1-b10-00-quantizer-00.ivf}}
+  GVI-026:
+    title: "Codec controls force_key_frame, video_bitrate, video_bitrate_mode, video_gop_size, video_peak_bitrate, encoded and decoded"
+    tests:
+    - {test: video.controls, args: {names: [force_key_frame, video_bitrate, video_bitrate_mode, video_gop_size, video_peak_bitrate]}}
+    - {test: video.roundtrip, args: {codec: H264, controls: 'video_gop_size=10,video_bitrate_mode=1,video_bitrate=1000000'}}
+  GVI-027:
+    title: "GStreamer streaming elements; HLS streaming on the device"
+    tests:
+    - {test: video.gst_elements, args: {names: [mp4mux, qtdemux, matroskademux, mpegtsmux, tsdemux, hlssink2, hlsdemux, souphttpsrc, rtspsrc, rtpbin, rtph264pay]}}
+    - {test: video.hls_local}
+  GVI-028:
+    title: "HEVC encode and decode (1920x1080, 1 frame)"
+    test: video.roundtrip
+    args: {codec: HEVC, count: 1, height: 1080, width: 1920}
+  GVI-029:
+    title: "AV01 decoder and conformance vector av1-1-b8-00-quantizer-00.ivf"
+    tests:
+    - {test: video.codec, args: {codec: AV01, role: decoder}}
+    - {test: video.decode_vector, args: {codec: AV01, vector: av1-1-b8-00-quantizer-00.ivf}}
   GCA-001:
     title: "Media graph with a sensor"
     test: camera.graph
@@ -223,6 +471,16 @@ requirements:
   GCA-005:
     title: "GStreamer libcamerasrc"
     test: camera.libcamerasrc
+  GCA-011:
+    title: "Media graph with a sensor; raw capture through the media graph"
+    tests:
+    - {test: camera.graph}
+    - {test: camera.raw_capture}
+  GCA-012:
+    title: "libcamera capture; GStreamer libcamerasrc"
+    tests:
+    - {test: camera.libcamera}
+    - {test: camera.libcamerasrc}
   GPL-001:
     title: "DRM drivers in tree"
     test: platform.in_tree

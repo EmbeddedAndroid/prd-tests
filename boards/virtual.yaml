@@ -55,8 +55,14 @@ absent:
   pipewire: no PipeWire daemon runs in the VM
   video-decoder-H264: vicodec codes FWHT only
   video-encoder-H264: vicodec codes FWHT only
+  video-decoder-HEVC: vicodec codes FWHT only
+  video-encoder-HEVC: vicodec codes FWHT only
+  video-decoder-VP90: vicodec codes FWHT only
+  video-decoder-AV01: vicodec codes FWHT only
   gst-v4l2-decoder-FWHT: GStreamer has no v4l2 element for FWHT
   gst-v4l2-encoder-FWHT: GStreamer has no v4l2 element for FWHT
+  gst-v4l2-decoder-H264: vicodec codes FWHT only, so GStreamer has no v4l2 H.264 decoder
+  gst-v4l2-encoder-H264: vicodec codes FWHT only, so GStreamer has no v4l2 H.264 encoder
   tee: no TEE in the VM
   remoteproc: no remote processors in the VM
   thermal: no thermal zones in a QEMU virt machine
@@ -65,6 +71,7 @@ absent:
 # requirements that need no hardware, so they may pass in the bare VM
 hardware_free:
   GVI-009: GStreamer element inventory, user space only
+  GVI-027: its element inventory half is user space only; the HLS half skips without a codec
 
 # fails accepted on this board, each with the reason (tools/vm/expect.py):
 # what vkms, snd-aloop and libcamera 0.2 in Ubuntu 24.04 do not do
@@ -80,5 +87,15 @@ known_fail:
   GDS-024: vkms has no variable refresh rate
   GDS-025: vkms encoders list only themselves in possible_clones, so the virtual connector and writeback cannot share a CRTC
   GDS-029: a VM boots without a boot loader framebuffer
+  GDS-042: vkms has no colour transform matrix
+  GDS-046: vkms connectors have no HDR_OUTPUT_METADATA property
+  GDS-049: vkms in Linux 6.8 has no plane colour pipeline (COLOR_PIPELINE)
   GAU-017: alsabat's round trip asks snd-aloop for a period equal to its 16-frame buffer, which snd-aloop refuses
+  GVI-015: the vicodec FWHT encoder has no frame skip mode control
+  GVI-016: the vicodec FWHT encoder has no intra refresh period control
+  GVI-017: the vicodec FWHT encoder has no long term reference controls
+  GVI-018: the vicodec FWHT encoder has no slice partitioning controls
+  GVI-019: the vicodec FWHT encoder has no hierarchical coding controls
+  GVI-022: the vicodec FWHT encoder has no rotate or flip controls
   GCA-005: libcamerasrc (libcamera 0.2) on vimc with the software ISP delivers one buffer and stalls; cam captures from the same camera (GCA-004)
+  GCA-012: libcamerasrc stalls on vimc as in GCA-005; cam captures from the same camera
