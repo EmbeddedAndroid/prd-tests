@@ -25,10 +25,11 @@ and measurements is a dict of numbers or strings. It raises:
 Any other exception is a fail with the exception text; so is a test
 that has no result after 900 s.
 
-The runner then applies the requirement's target to the measurements:
-a pass whose measurements miss the target, or do not measure it, is
-partial; so is a pass for a requirement whose target is "none" (the
-requirement states no number to meet). partial is reported to LAVA as "unknown" so it is never counted
+The runner then applies the requirement's target to the measurements
+(the board profile's targets.<ID> where it gives one, else the
+requirement's own): a pass whose measurements miss the target, or do
+not measure it, is partial; so is a pass for a requirement whose
+target is "none" (the requirement states no number to meet). partial is reported to LAVA as "unknown" so it is never counted
 as a pass."""
 import importlib
 import json
@@ -41,6 +42,9 @@ import traceback
 
 LAVA = {'pass': 'pass', 'fail': 'fail', 'skip': 'skip', 'partial': 'unknown'}
 REGISTRY = {}
+NO_TARGET = '; measured, but the requirement states no target to meet'
+MISSED = '; target not met: '
+
 
 
 class Skip(Exception):
@@ -178,6 +182,40 @@ def fmt_meas(meas):
     return ' '.join(out)
 
 
+def combine(parts):
+    """Status and reason of a requirement with several tests from their
+    (test, status, reason): fail when any part fails, pass when all pass,
+    skip when all skip, partial otherwise."""
+    st = [p[1] for p in parts]
+    reason = ' || '.join('%s %s: %s' % p for p in parts)
+    if 'fail' in st:
+        return 'fail', reason
+    if all(s == 'skip' for s in st):
+        return 'skip', reason
+    if all(s == 'pass' for s in st):
+        return 'pass', reason
+    return 'partial', reason
+
+
+def settle(status, reason, meas, target, note=None):
+    """Apply a target ("none", or a dict for check_target) and a note to
+    a test's status and reason."""
+    if status == 'pass' and target == 'none':
+        status = 'partial'
+        reason += NO_TARGET
+    elif status == 'pass' and target:
+        try:
+            miss = check_target(meas, target)
+        except Exception as e:  # a measurement that cannot be compared misses
+            miss = ['target %r not comparable: %s' % (target, e)]
+        if miss:
+            status = 'partial'
+            reason += MISSED + '; '.join(miss)
+    if note:
+        reason += ' (%s)' % note
+    return status, reason
+
+
 class Runner:
     def __init__(self, env, outdir='output'):
         self.env = env
@@ -226,15 +264,8 @@ class Runner:
         meas = {}
         for r in res:
             meas.update(r[2])
-        st = [r[0] for r in res]
-        reason = ' || '.join('%s %s: %s' % (p['test'], r[0], r[1]) for p, r in zip(parts, res))
-        if 'fail' in st:
-            return 'fail', reason, meas
-        if all(s == 'skip' for s in st):
-            return 'skip', reason, meas
-        if all(s == 'pass' for s in st):
-            return 'pass', reason, meas
-        return 'partial', reason, meas
+        st, reason = combine([(p['test'], r[0], r[1]) for p, r in zip(parts, res)])
+        return st, reason, meas
 
     def requirement(self, rid, req):
         name = req.get('test') or '+'.join(p['test'] for p in req.get('tests', []))
@@ -244,20 +275,8 @@ class Runner:
             status, reason, meas = self.composite(req['tests'])
         else:
             status, reason, meas = self.call(name, req.get('args'))
-        target = req.get('target')
-        if status == 'pass' and target == 'none':
-            status = 'partial'
-            reason += '; measured, but the requirement states no target to meet'
-        elif status == 'pass' and target:
-            try:
-                miss = check_target(meas, target)
-            except Exception as e:  # a measurement that cannot be compared misses
-                miss = ['target %r not comparable: %s' % (target, e)]
-            if miss:
-                status = 'partial'
-                reason += '; target not met: ' + '; '.join(miss)
-        if req.get('note'):
-            reason += ' (%s)' % req['note']
+        target = self.env.cfg('targets', rid, default=req.get('target'))
+        status, reason = settle(status, reason, meas, target, req.get('note'))
         self.counts[status] = self.counts.get(status, 0) + 1
         dt = time.time() - t0
         print('PRD %s %s: %s%s (%.1f s)' % (rid, status, reason,

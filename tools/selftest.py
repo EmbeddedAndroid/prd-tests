@@ -8,7 +8,8 @@ with arguments that test takes, every audio case a product names must be
 defined by each board profile that has audio cases, and every run_last
 entry must name a test and match a product requirement. Regression cases
 cover run_last ordering, shell case status, the latency onset channel,
-codec roles, decoder output caps and the per-test time limit. Exit status 1 on any mismatch."""
+codec roles, decoder output caps, the per-test time limit and board
+targets. Exit status 1 on any mismatch."""
 import glob
 import inspect
 import json
@@ -323,6 +324,7 @@ def check_units():
         if dp.PACKED_YUV != {'YUYV': (0, 1, 2, 3), 'YVYU': (0, 3, 2, 1), 'UYVY': (1, 0, 3, 2),
                              'VYUY': (3, 0, 1, 2)}:
             bad.append('PACKED_YUV order %s' % dp.PACKED_YUV)
+    bad += check_board_targets()
     r = core.Runner(core.Env({}), tempfile.mkdtemp(prefix='prd-selftest-'))
     r.missing = 'skip'
     st_, why, _ = r.call('fake.missing', {})
@@ -336,6 +338,26 @@ def check_units():
         print('FAIL unit', x)
     print('selftest: %d unit problems' % len(bad))
     return len(bad)
+
+
+def run_one(req, board, missing, rid='R-1'):
+    r = core.Runner(core.Env(board), tempfile.mkdtemp(prefix='prd-selftest-'))
+    r.missing = missing
+    r.requirement(rid, req)
+    r.done()
+    return json.loads(open(os.path.join(r.outdir, 'results.jsonl')).read())
+
+
+def check_board_targets():
+    """A board's targets.<ID> replaces the row's target, for that ID only."""
+    bad = []
+    got = run_one({'test': 'fake.ok', 'target': {'v': 8}}, {'targets': {'R-1': {'v': 12}}}, 'fail')
+    if got['status'] != 'partial':
+        bad.append('board target does not override the row target: %s' % got)
+    got = run_one({'test': 'fake.ok'}, {'targets': {'R-2': {'v': 12}}}, 'fail')
+    if got['status'] != 'pass':
+        bad.append('board target of another row applied: %s' % got)
+    return bad
 
 
 def main():

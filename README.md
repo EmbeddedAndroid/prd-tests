@@ -42,7 +42,7 @@ paths live in optional modules a board profile enables
 Every requirement gets exactly one of:
 
 - pass: measured and meets what the test checks, and the target if the
-  map gives one;
+  map or the board profile gives one;
 - partial: works, but the target is not met or not measured, or the
   requirement states no number (`target: none`), or only part of the
   feature could be exercised; reported to LAVA as `unknown`, never as
@@ -188,6 +188,8 @@ Copy a profile in `boards/` and fill in what applies:
   `qti-cam-server`) and the `cameras` the CamX stack exposes (`id`,
   `width`, `height`, `fps`, `format`), used by the `camx` module.
 - `modules`: optional vendor modules (`audioreach`, `camx`).
+- `targets`: numbers this board must reach, by requirement ID, in the
+  target syntax below; they replace the requirement's own target.
 - `run_last`: tests that leave the device changed for the rest of the
   run (a test name, optionally with `key=value` arguments, for example
   `audio.case case=compress`); requirements using them run after the
