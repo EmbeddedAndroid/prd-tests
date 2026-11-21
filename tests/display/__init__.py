@@ -311,9 +311,15 @@ def compose_once(d, layers, crtc_extra=None, wb_fmt=XR24, w=WB_W, h=WB_H, test_o
     if len(layers) > len(cand):
         return None, 'only %d planes on the writeback CRTC' % len(cand)
     mblob = card.create_blob(kms.Mode.make(w, h).raw)
-    cap = card.dumb(w, h, 32)
-    cap['map'][:] = b'\x5a' * cap['size']
-    capfb = card.addfb2(w, h, wb_fmt, [cap['handle']], [cap['pitch']], [0])
+    if wb_fmt == NV12:
+        cap = card.dumb(w, h * 3 // 2, 8)
+        cap['map'][:] = b'\x5a' * cap['size']
+        capfb = card.addfb2(w, h, wb_fmt, [cap['handle']] * 2, [cap['pitch']] * 2,
+                            [0, cap['pitch'] * h])
+    else:
+        cap = card.dumb(w, h, 32)
+        cap['map'][:] = b'\x5a' * cap['size']
+        capfb = card.addfb2(w, h, wb_fmt, [cap['handle']], [cap['pitch']], [0])
     fence = kms.ctypes.c_int32(-1)
     cp = d.crtc_props[crtc]
     wp = d.conn_props[d.wb['id']]
@@ -949,35 +955,82 @@ def t_formats(env):
             {'formats': ok_l, 'count': len(ok_l)})
 
 
+# DRM RGB layouts: components from the most significant bit down, and their
+# widths, of a little-endian pixel word
+RGB_LAYOUT = {
+    'XR24': ('XRGB', (8, 8, 8, 8)), 'AR24': ('ARGB', (8, 8, 8, 8)),
+    'XB24': ('XBGR', (8, 8, 8, 8)), 'AB24': ('ABGR', (8, 8, 8, 8)),
+    'RX24': ('RGBX', (8, 8, 8, 8)), 'RA24': ('RGBA', (8, 8, 8, 8)),
+    'BX24': ('BGRX', (8, 8, 8, 8)), 'BA24': ('BGRA', (8, 8, 8, 8)),
+    'RG24': ('RGB', (8, 8, 8)), 'BG24': ('BGR', (8, 8, 8)),
+    'RG16': ('RGB', (5, 6, 5)), 'BG16': ('BGR', (5, 6, 5)),
+    'XR15': ('XRGB', (1, 5, 5, 5)), 'AR15': ('ARGB', (1, 5, 5, 5)),
+    'XB15': ('XBGR', (1, 5, 5, 5)), 'AB15': ('ABGR', (1, 5, 5, 5)),
+    'RX15': ('RGBX', (5, 5, 5, 1)), 'RA15': ('RGBA', (5, 5, 5, 1)),
+    'BX15': ('BGRX', (5, 5, 5, 1)), 'BA15': ('BGRA', (5, 5, 5, 1)),
+    'XR12': ('XRGB', (4, 4, 4, 4)), 'AR12': ('ARGB', (4, 4, 4, 4)),
+    'XB12': ('XBGR', (4, 4, 4, 4)), 'AB12': ('ABGR', (4, 4, 4, 4)),
+    'RX12': ('RGBX', (4, 4, 4, 4)), 'RA12': ('RGBA', (4, 4, 4, 4)),
+    'BX12': ('BGRX', (4, 4, 4, 4)), 'BA12': ('BGRA', (4, 4, 4, 4)),
+    'XR30': ('XRGB', (2, 10, 10, 10)), 'AR30': ('ARGB', (2, 10, 10, 10)),
+    'XB30': ('XBGR', (2, 10, 10, 10)), 'AB30': ('ABGR', (2, 10, 10, 10)),
+}
+# three distinct levels: a swap of any two colour components shows
+WB_RGB = (224, 96, 32)
+
+
+def px_fmt(cap, x, y, name):
+    """(r, g, b) at 8 bits of pixel x, y in a capture of an RGB layout."""
+    order, bits = RGB_LAYOUT[name]
+    n = sum(bits) // 8
+    o = y * cap['pitch'] + x * n
+    v = int.from_bytes(cap['map'][o:o + n], 'little')
+    out, sh_ = {}, sum(bits)
+    for c, w in zip(order, bits):
+        sh_ -= w
+        out[c] = ((v >> sh_) & ((1 << w) - 1)) * 255 / ((1 << w) - 1)
+    return tuple(round(out[c]) for c in 'RGB')
+
+
+def ycbcr_match(yuv, rgb, tol=4):
+    """Standard encodings and ranges under which yuv encodes rgb."""
+    return ['%s %s' % (e, 'full' if f else 'limited') for e in YCBCR_K for f in (False, True)
+            if all(abs(a - b) <= tol for a, b in zip(yuv, rgb_to_ycbcr(rgb, e, f)))]
+
+
 @wbtest('display.wb_formats')
 def t_wb_formats(env):
     """Output formats: writeback captures in each advertised RGB format"""
     d = K(env)
     d.need_wb()
     fl = wb_formats(d)
-    fb = fb_solid(d.card, WB_W, WB_H, RED)
-    # px() reads memory as B, G, R: red is (255,0,0) in XR24/AR24 and
-    # (0,0,255) in the byte-swapped XB24/AB24
-    want = {'XR24': RED, 'AR24': RED, 'XB24': BLUE, 'AB24': BLUE}
+    fb = fb_solid(d.card, WB_W, WB_H, WB_RGB)
     ok_l, bad, other = [], [], []
     for n in fl:
-        if n not in want:
+        if n not in RGB_LAYOUT and n != 'NV12':
             other.append(n)
             continue
         cap, err = compose(d, [Layer(fb[0], WB_W, WB_H, (0, 0, WB_W, WB_H))], wb_fmt=fourcc(n))
         if err:
             bad.append('%s %s' % (n, err))
             continue
-        got = px(cap, 10, 10)
+        if n == 'NV12':
+            p = cap['pitch']
+            uv = WB_H * p + 5 * p + 10
+            yuv = (cap['map'][10 * p + 10], cap['map'][uv], cap['map'][uv + 1])
+            m = ycbcr_match(yuv, WB_RGB)
+            d.card.free_dumb(cap)
+            (ok_l.append('NV12 (%s)' % ' or '.join(m)) if m else
+             bad.append('NV12 Y%d U%d V%d matches no standard encoding of %s' % (yuv + (WB_RGB,))))
+            continue
+        got = px_fmt(cap, 10, 10, n)
         d.card.free_dumb(cap)
-        if near(got, want[n]):
-            ok_l.append(n)
-        else:
-            bad.append('%s wrong %s' % (n, got))
+        tol = 255 // ((1 << min(b for c, b in zip(*RGB_LAYOUT[n]) if c in 'RGB')) - 1) + 4
+        (ok_l.append(n) if near(got, WB_RGB, tol) else bad.append('%s wrong %s' % (n, got)))
     free(d.card, fb)
     return ('fail' if bad or not ok_l else 'partial' if other else 'pass',
-            'writeback formats advertised %s; captured and verified %s%s%s' % (
-                ' '.join(fl), ' '.join(ok_l), '; failed: ' + '; '.join(bad) if bad else '',
+            'writeback formats advertised %s; %s captured and verified %s%s%s' % (
+                ' '.join(fl), WB_RGB, ' '.join(ok_l), '; failed: ' + '; '.join(bad) if bad else '',
                 '; advertised, not exercised: ' + ' '.join(other) if other else ''),
             {'formats': fl, 'verified': ok_l})
 
