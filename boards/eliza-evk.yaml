@@ -25,6 +25,8 @@ display:
   external: [DP]
   compositor: weston
   wayland: {runtime_dir: /run/user/1000, display: wayland-1}
+  # kgsl (downstream GPU stack) has no DRM client usage stats
+  gpu_busy: /sys/class/kgsl/kgsl-3d0/gpubusy
 
 audio:
   card: eliza-cqs-evk
