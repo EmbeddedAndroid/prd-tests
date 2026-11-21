@@ -1303,6 +1303,11 @@ def clone_once(d, k, crtc, mode):
            d.wb['id']: {wp['CRTC_ID'][0]: crtc, wp['WRITEBACK_FB_ID'][0]: capfb,
                         wp['WRITEBACK_OUT_FENCE_PTR'][0]: kms.ctypes.addressof(fence)},
            pl['id']: plane_req(pl, crtc, Layer(fb[0], w, h, (0, 0, w, h)), c)}
+    for o in d.conns:
+        if o['id'] not in (k['id'], d.wb['id']):
+            op = c.props(o['id'], kms.OBJ_CONNECTOR)
+            if op.get('CRTC_ID', (0, 0))[1] == crtc:
+                req[o['id']] = {op['CRTC_ID'][0]: 0}
     for p in d.planes:
         pc = c.props(p['id'], kms.OBJ_PLANE).get('CRTC_ID', (0, 0))
         if pc[1] == crtc and p['id'] != pl['id']:
@@ -1345,7 +1350,8 @@ def clone_once(d, k, crtc, mode):
     ok = all(near(g, e) for g, e in zip(got, cols))
     return ('pass' if ok else 'fail',
             '%s at %dx%d and writeback on CRTC %d in one commit: quadrants %s (expected red, '
-            'green, blue, white); link-status good, CRTC still active' % (k['name'], w, h, crtc, got),
+            'green, blue, white); %sCRTC still active' % (
+                k['name'], w, h, crtc, got, 'link-status good, ' if ls else ''),
             {'width': w, 'height': h})
 
 
