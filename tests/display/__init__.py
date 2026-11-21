@@ -1200,8 +1200,11 @@ def t_crtc_lut(env, prop='GAMMA_LUT', ctm=None, want=None, uncovered=None):
     d.need_wb()
     size_prop = {'GAMMA_LUT': 'GAMMA_LUT_SIZE', 'DEGAMMA_LUT': 'DEGAMMA_LUT_SIZE'}.get(prop)
     if prop == 'CTM':
-        blob = ctm_blob(d.card, ctm or (0, 0, 1, 0, 1, 0, 1, 0, 0))   # default: swap red and blue
-        want = tuple(want) if want else (50, 100, 200)
+        # default: swap red and blue, and take a quarter of red from green;
+        # asymmetric with a negative weight, so a transposed matrix or a
+        # dropped sign shows
+        blob = ctm_blob(d.card, ctm or (0, 0, 1, -0.25, 1, 0, 1, 0, 0))
+        want = tuple(want) if want else (50, 50, 200)
     else:
         n = cp[size_prop][1] if size_prop in cp else 0
         if not n:
