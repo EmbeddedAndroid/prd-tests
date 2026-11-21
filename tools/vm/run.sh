@@ -76,6 +76,9 @@ if [ "$(head -c 2 "$k" | od -An -tx1 | tr -d ' ')" = 1f8b ]; then
 	zcat "$k" > "$img"
 	k=$img
 fi
+# QEMU's 9p server holds a host descriptor for every file open in the
+# guest; at a 1024 soft limit guest programs fail with EMFILE
+ulimit -n "$(ulimit -Hn)"
 timeout 3600 vng --run "$k" --user root --rw --memory 3G --cpus 2 \
 	--qemu-opts="-chardev socket,id=chrtpm,path=$tpm/sock -tpmdev emulator,id=tpm0,chardev=chrtpm -device $tdev,tpmdev=tpm0" \
 	--exec "sh $top/tools/vm/inside.sh $mode $product $out" > "$out/console.log" 2>&1 || true
