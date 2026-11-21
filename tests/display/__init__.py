@@ -1215,16 +1215,23 @@ def t_crtc_lut(env, prop='GAMMA_LUT'):
         msg = '%s applied: (200,100,50) -> %s, expected ~%s' % (prop, got, want)
         if prop == 'CTM':
             return 'pass', msg
-        # a LUT shorter than the advertised size must be refused, not read past its end
-        blob = d.card.create_blob(struct.pack('<HHHH', 0xffff, 0xffff, 0xffff, 0))
+        # a LUT shorter than the size may be refused or sub-sampled (KMS uAPI);
+        # black to white sub-samples to identity, a read past its end does not
+        blob = d.card.create_blob(struct.pack('<8H', 0, 0, 0, 0, 0xffff, 0xffff, 0xffff, 0))
         fb = fb_solid(d.card, WB_W, WB_H, (200, 100, 50))
-        _, err = compose(d, [Layer(fb[0], WB_W, WB_H, (0, 0, WB_W, WB_H))],
-                         crtc_extra={prop: blob}, test_only=True)
+        cap, err = compose(d, [Layer(fb[0], WB_W, WB_H, (0, 0, WB_W, WB_H))], crtc_extra={prop: blob})
         d.card.destroy_blob(blob)
         free(d.card, fb)
-        if err is None:
-            return 'fail', '%s; a 1-entry %s was accepted where %s is %d' % (msg, prop, size_prop, n)
-        return 'pass', '%s; a 1-entry %s is refused (%s)' % (msg, prop, err)
+        if err and err.startswith('atomic commit refused'):
+            return 'pass', '%s; a 2-entry %s is refused (%s)' % (msg, prop, err)
+        if err:
+            return 'fail', '%s; 2-entry %s commit: %s' % (msg, prop, err)
+        short = px(cap, 100, 100)
+        d.card.free_dumb(cap)
+        if near(short, (200, 100, 50), 12):
+            return 'pass', '%s; a 2-entry %s is sub-sampled: -> %s' % (msg, prop, short)
+        return 'fail', '%s; a 2-entry %s of %d was accepted and gave %s, not ~(200,100,50)' % (
+            msg, prop, n, short)
     if near(got, (200, 100, 50), 6):
         return ('partial', '%s accepted on the writeback CRTC but the capture at the writeback '
                 'output is unchanged %s; the effect needs a sink capture to observe' % (prop, got))
