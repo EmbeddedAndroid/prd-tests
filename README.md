@@ -6,7 +6,9 @@ interfaces every open Linux stack should pass, and `products/qcom.yaml`,
 the interfaces and KPIs only Qualcomm stacks have. A board profile
 supplies the few facts a test cannot discover and the numbers the board
 must reach; one runner executes the rows on a device and reports each
-as pass, partial, fail or skip with the reason and the measurements.
+as pass, partial, fail or skip with the reason and the measurements. A
+product's own requirements map onto those rows (see "Products and
+requirement maps").
 
 The tests use the kernel and user space interfaces any board exposes:
 DRM/KMS (atomic API, dumb buffers, writeback) and Wayland/EGL for
@@ -27,6 +29,7 @@ paths live in optional modules a board profile enables
 | `tests/<interface>/` | the generic tests of one interface: `display`, `video`, `camera`, `audio` (with the shell `test-definitions` cases), `platform`; optional vendor modules `audioreach` and `camx` |
 | `boards/<board>.yaml` | board profiles: LAVA deploy data, display roles, audio routes and cases, camera graph setup, enabled modules, hardware the board does not have |
 | `products/generic.yaml`, `products/qcom.yaml` | the rows: ID to test, arguments and target; standard interfaces and Qualcomm-specific ones |
+| `products/counts/<map>.yaml` | public count of a requirement map kept outside the repository: how many of its requirements map to each row |
 | `tools/run.py` | the runner (on the device) |
 | `tools/mk-overlay.sh` | tars runner, tests, profiles and maps for a LAVA overlay at `/prd` |
 | `tools/fetch-vectors.sh` | downloads the public video conformance vectors for the overlay |
@@ -34,6 +37,8 @@ paths live in optional modules a board profile enables
 | `tools/selftest.py` | checks the result rules and that every product map entry names an existing test with valid arguments |
 | `tools/check-generic.py` | refuses board, SoC, card, codec, sensor, connector instance, GPIO and register names under `tests/` (CI) |
 | `tools/matrix.py` | test x platform matrix of a product run on several boards (LAVA jobs or results.jsonl) |
+| `tools/check-map.py` | checks requirement maps and count files against the rows (CI: the public side) |
+| `tools/coverage.py` | per requirement results of a requirement map from runs of the rows |
 | `tools/vm/` | the virtual board: run the suite on Linux virtual drivers in QEMU (`run.sh`), its host setup and the CI verdict (`expect.py`) |
 | `tools/scrub.sh` | refuses internal hosts, addresses and secrets; runs in CI on every push |
 | `diagnostics/<board>/` | board bring-up probes (GPIO and register level); not requirement tests |
@@ -104,8 +109,9 @@ restores the stock image on the same device: submit it right after the
 test job (needs `STOCK_IMAGE_URL`, `STOCK_IMAGE_DIR`,
 `STOCK_UEFI_VERSION`, optional `STOCK_ARTIFACT_HEADER`).
 
-`python3 tools/selftest.py` checks the runner rules and the products;
-run it after editing a test, a profile or a product.
+`python3 tools/selftest.py` checks the runner rules and the rows, and
+`python3 tools/check-map.py` the count files; run both after editing a
+test, a profile or a product.
 
 ## Virtual board and CI
 
@@ -132,10 +138,10 @@ passes, is partial, or skips with the board's reason, unless
 (features vkms and snd-aloop do not have). A bare run must not pass
 anything that needs the drivers, which shows the tests are not vacuous.
 `.github/workflows/virtual.yml` runs both on x86_64 and arm64 runners
-for every push; `scrub.yml` runs the scrub, the generic names gate and
-the selftest.
+for every push; `scrub.yml` runs the scrub, the generic names gate,
+the map checker and the selftest.
 
-## Products
+## Products and requirement maps
 
 `products/generic.yaml` has one row per test and arguments on the
 standard interfaces (DRM/KMS with writeback, Wayland/EGL, V4L2 codecs
@@ -156,9 +162,25 @@ Both set `missing: skip`: a missing interface is a skip ("interface
 absent"), since the matrix asks which interfaces work. Row IDs are
 never reused.
 
-A product map that demands a feature (`products/eliza.yaml`) keeps the
-default, where a missing interface is a fail unless the board profile
-lists the hardware as absent.
+A product's requirements live in a requirement map: requirement ID,
+title, the one row it maps to, and optionally a target of its own
+(`none` when the requirement states no number) and a note. A map that
+carries internal requirement IDs stays outside this repository; its
+public trace is `products/counts/<map>.yaml`, the number of
+requirements per row, which `tools/check-map.py` checks against the
+rows in CI. With the map at hand:
+
+    python3 tools/check-map.py --map <map.yaml>
+    python3 tools/coverage.py --map <map.yaml> <job> [<job> ...]
+
+`coverage.py` reports every requirement from the runs of the rows:
+under the map's default `missing: fail` a part skipped because its
+interface is missing fails (the requirement needs it), then the map's
+target and note apply. From a run's results.jsonl it gives the same
+status and reason as running the requirements themselves
+(`tools/selftest.py` checks this on every result rule); from a LAVA
+log a composite reason broken by a console line inside its " || "
+separator is reported "unparsed".
 
 The current matrix is in `results/matrix.md`.
 Totals of the current run (pass/partial/fail/skip of 72, recorded before
@@ -218,7 +240,7 @@ Copy a profile in `boards/` and fill in what applies:
 
 Nothing else changes: the same rows run on the new board.
 
-## Adding rows
+## Adding rows and a requirement map
 
 A row in `products/generic.yaml` (standard interface) or
 `products/qcom.yaml` (Qualcomm-specific) has a `title`, a `test` and
@@ -237,6 +259,13 @@ exact value (`{eq: 10}`) or a list the measured list must contain;
 `tests` fails when any of them fails, passes when all pass, skips when
 all skip, and is partial otherwise. `areas` maps ID prefixes to the
 `--area` names. Run `tools/selftest.py` to check the rows.
+
+A requirement map is YAML: `product`, `board` (the profile whose
+targets apply), `missing` (default `fail`) and `requirements`, each
+with `id` (the ID a public product used, if any), `title`, `row` and
+optional `target` and `note`. Add its count to
+`products/counts/` (`map`, `requirements`, `rows`: count per row) and
+run `tools/check-map.py --map <map.yaml>`.
 
 ## Licensing
 

@@ -29,8 +29,8 @@ The runner then applies the requirement's target to the measurements
 (the board profile's targets.<ID> where it gives one, else the
 requirement's own): a pass whose measurements miss the target, or do
 not measure it, is partial; so is a pass for a requirement whose
-target is "none" (the requirement states no number to meet). partial is reported to LAVA as "unknown" so it is never counted
-as a pass."""
+target is "none" (the requirement states no number to meet). partial
+is reported to LAVA as "unknown" so it is never counted as a pass."""
 import importlib
 import json
 import os
@@ -42,9 +42,10 @@ import traceback
 
 LAVA = {'pass': 'pass', 'fail': 'fail', 'skip': 'skip', 'partial': 'unknown'}
 REGISTRY = {}
+# reason prefix of a missing interface under "missing: skip"
+ABSENT = 'interface absent: '
 NO_TARGET = '; measured, but the requirement states no target to meet'
 MISSED = '; target not met: '
-
 
 
 class Skip(Exception):
@@ -216,6 +217,41 @@ def settle(status, reason, meas, target, note=None):
     return status, reason
 
 
+def as_missing_fail(tests, status, reason):
+    """A result recorded under "missing: skip" as a product with the
+    default policy sees it: a part skipped with ABSENT is a fail with
+    the reason the test gave. tests is the list of the requirement's
+    test names (one, or the parts in order). A result with no such part
+    is returned as it is: a target or note settle() applied stays. With
+    such a part the runner never got a pass, so no target was applied.
+    ValueError when a composite reason does not split into its parts."""
+    if len(tests) == 1:
+        if status == 'skip' and reason.startswith(ABSENT):
+            return 'fail', reason[len(ABSENT):]
+        return status, reason
+    parts = []
+    moved = False
+    rest = reason
+    for i, t in enumerate(tests):
+        head = '%s ' % t
+        if not rest.startswith(head):
+            raise ValueError('reason does not start with part %s: %r' % (t, rest[:80]))
+        rest = rest[len(head):]
+        st, _, rest = rest.partition(': ')
+        if i + 1 < len(tests):
+            nxt = ' || %s ' % tests[i + 1]
+            j = rest.find(nxt)
+            if j < 0:
+                raise ValueError('no part %s in %r' % (tests[i + 1], rest[:80]))
+            why, rest = rest[:j], rest[j + 4:]
+        else:
+            why = rest
+        if st == 'skip' and why.startswith(ABSENT):
+            st, why, moved = 'fail', why[len(ABSENT):], True
+        parts.append((t, st, why))
+    return combine(parts) if moved else (status, reason)
+
+
 class Runner:
     def __init__(self, env, outdir='output'):
         self.env = env
@@ -243,7 +279,7 @@ class Runner:
             if why:
                 return 'skip', '%s; board: %s' % (e, why), {}
             if self.missing == 'skip':
-                return 'skip', 'interface absent: %s' % e, {}
+                return 'skip', ABSENT + str(e), {}
             return 'fail', str(e), {}
         except Exception as e:  # a crash in a test is a fail, with the reason
             traceback.print_exc(file=sys.stdout)

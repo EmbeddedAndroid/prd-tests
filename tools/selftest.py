@@ -8,8 +8,9 @@ with arguments that test takes, every audio case a product names must be
 defined by each board profile that has audio cases, and every run_last
 entry must name a test and match a product requirement. Regression cases
 cover run_last ordering, shell case status, the latency onset channel,
-codec roles, decoder output caps, the per-test time limit and board
-targets. Exit status 1 on any mismatch."""
+codec roles, decoder output caps, the per-test time limit, board
+targets and the re-derivation tools/coverage.py applies, including
+reasons a console line break cut. Exit status 1 on any mismatch."""
 import glob
 import inspect
 import json
@@ -325,6 +326,8 @@ def check_units():
                              'VYUY': (3, 0, 1, 2)}:
             bad.append('PACKED_YUV order %s' % dp.PACKED_YUV)
     bad += check_board_targets()
+    bad += check_rederive()
+    bad += check_unparsed()
     r = core.Runner(core.Env({}), tempfile.mkdtemp(prefix='prd-selftest-'))
     r.missing = 'skip'
     st_, why, _ = r.call('fake.missing', {})
@@ -357,6 +360,57 @@ def check_board_targets():
     got = run_one({'test': 'fake.ok'}, {'targets': {'R-2': {'v': 12}}}, 'fail')
     if got['status'] != 'pass':
         bad.append('board target of another row applied: %s' % got)
+    return bad
+
+
+def check_rederive():
+    """tools/coverage.py re-derives a requirement's result from the row
+    result recorded under "missing: skip": as_missing_fail, then settle
+    with the map's target (only for a row run without one), must give
+    what a run under the default policy with that target gives."""
+    bad = []
+    extra = [({'tests': [{'test': 'fake.ok'}, {'test': 'fake.missing'}]}, {}),
+             ({'tests': [{'test': 'fake.missing'}, {'test': 'fake.skip'}]}, {}),
+             ({'tests': [{'test': 'fake.missing'}, {'test': 'fake.missing'}]}, {'DSI': 'x'}),
+             ({'tests': [{'test': 'fake.ok'}, {'test': 'fake.ok'}], 'target': {'w': 1}}, {}),
+             ({'tests': [{'test': 'fake.ok'}, {'test': 'fake.ok'}], 'target': 'none'}, {}),
+             ({'tests': [{'test': 'fake.ok'}, {'test': 'fake.missing'}], 'target': 'none'}, {})]
+    for req, absent in [c[:2] for c in CASES] + extra:
+        tests = [p['test'] for p in req.get('tests') or [req]]
+        for target in ([req['target']] if 'target' in req else [None, 'none', {'v': 12}]):
+            row = req
+            dev = run_one(row, {'absent': absent}, 'skip')
+            st, why = core.as_missing_fail(tests, dev['status'], dev['reason'])
+            if 'target' not in req:
+                st, why = core.settle(st, why, dev['meas'], target)
+            ref = run_one(dict(row, target=target), {'absent': absent}, 'fail')
+            if (st, why) != (ref['status'], ref['reason']):
+                bad.append('re-derive %s target %r: got %s %r, want %s %r' % (
+                    req, target, st, why, ref['status'], ref['reason']))
+    return bad
+
+
+def check_unparsed():
+    """coverage.py refuses a LAVA reason a console line break cut inside
+    the part separator or the "interface absent: " prefix."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location('cov', os.path.join(TOP, 'tools', 'coverage.py'))
+    cov = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cov)
+    bad = []
+    one = {'test': 'fake.missing'}
+    two = {'tests': [{'test': 'fake.ok'}, {'test': 'fake.missing'}]}
+    for row, res in ((one, ('skip', 'interface ab | sent: no DSI connector', {})),
+                     (two, ('partial', 'fake.ok pass: ok | | | fake.missing skip: x', {})),
+                     (two, ('partial', 'fake.ok pass: ok || fake.missing skip: interface | absent: x', {})),
+                     (two, ('skip', 'fake.ok skip: interface absent: y || fake.missing skip: interface | absent: x',
+                            {}))):
+        st = cov.derive(row, res, {}, 'fail')[0]
+        if st != 'unparsed':
+            bad.append('coverage of a cut reason %r: %s, want unparsed' % (res[1], st))
+    st = cov.derive(one, ('skip', 'interface absent: no DSI connector', {}), {}, 'fail')[0]
+    if st != 'fail':
+        bad.append('coverage of an absent interface: %s, want fail' % st)
     return bad
 
 
