@@ -13,7 +13,10 @@ Board profile keys used: display.primary, display.external (connector
 types), display.compositor (systemd unit holding DRM master, default
 weston) or display.compositor_cmd (a command to start it where there is
 no systemd), display.wayland (XDG_RUNTIME_DIR and WAYLAND_DISPLAY of the
-compositor), display.software_gl (accept a software GL renderer), absent.<key> for hardware the board does not have
+compositor), display.software_gl (accept a software GL renderer),
+display.gpu_busy (a file whose first number is the GPU's busy time in
+its last sample window, for GPU drivers without DRM client usage
+stats), absent.<key> for hardware the board does not have
 (<type> for a connector type, <type>-sink for a sink, writeback,
 backlight, touch, displays-<n>)."""
 import atexit
@@ -1432,7 +1435,14 @@ def t_wayland_gl(env, seconds=5, renderer=None, version=None,
                          stderr=subprocess.STDOUT, start_new_session=True)
     time.sleep(2)
     c0 = gpu_ns(p.pid)
-    time.sleep(seconds)
+    busy_path = env.cfg('display', 'gpu_busy')
+    busy = []
+    for _ in range(seconds):
+        time.sleep(1)
+        if busy_path and os.path.exists(busy_path):
+            n = re.findall(r'\d+', read(busy_path))
+            if n:
+                busy.append(int(n[0]))
     c1, w1 = gpu_ns(p.pid), gpu_ns(pid)
     alive = p.poll() is None
     p.terminate()
@@ -1448,6 +1458,15 @@ def t_wayland_gl(env, seconds=5, renderer=None, version=None,
         return 'fail', 'weston-simple-egl exited early (rc %s): %s' % (p.returncode, out.strip()[-300:]), meas
     if w0 is not None and w1 is not None:
         meas['compositor_gpu_ms'] = round((w1 - w0) / 1e6, 1)
+    if (c0 is None or c1 is None) and busy:
+        meas['gpu_busy'] = busy
+        if max(busy) > 0:
+            return ('pass' if rend else 'partial',
+                    'Wayland %s, EGL renderer %s, %s, weston-simple-egl %s; the driver reports no '
+                    'GPU time per client; GPU busy counter %s while the client ran: %s' % (
+                        sock, rend or 'unknown', ver or 'version unknown',
+                        'fps %s' % fps[-3:] if fps else 'ran', busy_path, busy), meas)
+        return 'fail', 'GPU busy counter %s stayed 0 while the EGL client ran' % busy_path, meas
     if c0 is None or c1 is None:
         return ('partial', 'Wayland %s, EGL renderer %s, %s; the driver reports no GPU time per '
                 'client, so hardware rendering is not proven' % (sock, rend, ver), meas)
