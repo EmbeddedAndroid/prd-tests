@@ -1,0 +1,36 @@
+metadata:
+    format: Lava-Test Test Definition 1.0
+    name: pal-latency
+    description: "Low latency playback and capture on the AudioReach PAL
+      path through its PipeWire nodes: playback and capture together at a
+      small node latency; per direction the larger of the graph quantum
+      and the node's PAL buffer must be at most MAX_PERIOD_MS, no xrun or
+      PAL read/write failure, the tone detected, a reference run at the
+      default latency and a muted control."
+    maintainer:
+        - tyler.baker@oss.qualcomm.com
+    os:
+        - openembedded
+    scope:
+        - functional
+        - performance
+
+params:
+    PLAY_NODE: ""
+    CAPTURE_NODE: ""
+    # Node latency in frames; PipeWire rounds it down to a power of two.
+    PERIOD_FRAMES: "256"
+    # Whole seconds.
+    DURATION: "10"
+    PLAY_CHANNEL: "2"
+    RATE: "48000"
+    FREQ: "1250"
+    TONE_DBFS: "-6"
+    MIN_DB: "20"
+    MAX_PERIOD_MS: "10"
+
+run:
+    steps:
+        - cd ./automated/linux/pal-latency/
+        - ./pal-latency.sh -p "${PLAY_NODE}" -q "${CAPTURE_NODE}" -F "${PERIOD_FRAMES}" -S "${DURATION}" -k "${PLAY_CHANNEL}" -R "${RATE}" -f "${FREQ}" -l "${TONE_DBFS}" -d "${MIN_DB}" -P "${MAX_PERIOD_MS}"
+        - ../../utils/send-to-lava.sh ./output/result.txt
