@@ -1,0 +1,23 @@
+# Eliza CQS EVK (eMMC) on the meta-qcom qcom-multimedia-proprietary-image
+# (config #2): the eliza-evk profile, but audio goes through AudioReach
+# PAL. meta-audioreach blacklists the upstream ASoC AudioReach modules
+# (q6apm-dai, snd-q6apm, snd-soc-sc8280xp) and audioreach_driver builds
+# the card from the DT links alone, so there are no MultiMedia front ends;
+# applications reach the DSP through the PipeWire PAL nodes.
+base: eliza-evk
+name: eliza-evk-proprietary
+
+lava:
+  image_dir: qcom-multimedia-proprietary-image-eliza-evk-emmc-open-fw
+
+audio:
+  cases:
+    latency:
+      dir: pal-latency
+      params:
+        PLAY_NODE: pal_sink_speaker_ll
+        CAPTURE_NODE: pal_source_speaker_mic_ll
+        # PipeWire rounds node latencies down to a power of two
+        PERIOD_FRAMES: 256
+        TONE_DBFS: -6
+        FREQ: 1600
