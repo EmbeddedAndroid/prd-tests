@@ -32,6 +32,8 @@ import sys
 import yaml
 
 TOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, TOP)
+from prd import core  # noqa: E402
 
 
 def header(var):
@@ -119,7 +121,7 @@ def main():
     ap.add_argument('-o', '--outdir', default='jobs')
     ap.add_argument('ids', nargs='*')
     a = ap.parse_args()
-    board = yaml.safe_load(open(a.board))
+    board = core.load_data(a.board)
     lv = board['lava']
     bname = os.path.splitext(os.path.basename(a.board))[0]
     pnames = [os.path.splitext(os.path.basename(p))[0] for p in a.product]

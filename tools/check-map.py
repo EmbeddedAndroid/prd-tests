@@ -39,6 +39,8 @@ import sys
 import yaml
 
 TOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, TOP)
+from prd import core  # noqa: E402
 ROWS = ('generic', 'qcom')
 
 
@@ -80,7 +82,7 @@ def main():
             c['map'], c['requirements'], len(c['rows'])))
     if a.map:
         m = yaml.safe_load(open(a.map))
-        board = yaml.safe_load(open(os.path.join(TOP, 'boards', '%s.yaml' % m['board'])))
+        board = core.load_data(os.path.join(TOP, 'boards', '%s.yaml' % m['board']))
         bt = board.get('targets') or {}
         reqs = m['requirements']
         per = {}

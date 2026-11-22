@@ -99,18 +99,34 @@ def have(tool):
 
 def load_data(path):
     """Board profiles and product maps are YAML in the tree; the overlay
-    carries a JSON copy next to each so the board needs no YAML module."""
+    carries a JSON copy next to each so the board needs no YAML module.
+    A file with a "base" key is that file (same directory) with this
+    one's keys merged over it, dictionaries key by key."""
     j = os.path.splitext(path)[0] + '.json'
     if path.endswith('.json') or (os.path.exists(j) and not os.path.exists(path)):
         with open(j) as f:
-            return json.load(f)
-    try:
-        import yaml
-    except ImportError:
-        with open(j) as f:
-            return json.load(f)
-    with open(path) as f:
-        return yaml.safe_load(f)
+            d = json.load(f)
+    else:
+        try:
+            import yaml
+            with open(path) as f:
+                d = yaml.safe_load(f)
+        except ImportError:
+            with open(j) as f:
+                d = json.load(f)
+    if isinstance(d, dict) and 'base' in d:
+        b = load_data(os.path.join(os.path.dirname(path), d.pop('base') + os.path.splitext(path)[1]))
+        d = merge(b, d)
+    return d
+
+
+def merge(a, b):
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return b
+    r = dict(a)
+    for k, v in b.items():
+        r[k] = merge(a.get(k), v)
+    return r
 
 
 class Env:

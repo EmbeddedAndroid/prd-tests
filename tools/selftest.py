@@ -337,6 +337,18 @@ def check_units():
     st_, why, _ = r.call('fake.slow', {}, limit=1)
     if st_ != 'fail' or 'Timeout' not in why:
         bad.append('timeout: got %s %s' % (st_, why))
+    d = tempfile.mkdtemp(prefix='prd-selftest-base-')
+    for ext in ('yaml', 'json'):
+        with open(os.path.join(d, 'b.%s' % ext), 'w') as f:
+            json.dump({'name': 'b', 'audio': {'card': 'c', 'cases': {'x': {'dir': 'a', 'params': {'P': 1}},
+                                                                   'y': {'dir': 'y'}}}}, f)
+        with open(os.path.join(d, 'k.%s' % ext), 'w') as f:
+            json.dump({'base': 'b', 'name': 'k', 'audio': {'cases': {'x': {'dir': 'z'}}}}, f)
+        got = core.load_data(os.path.join(d, 'k.%s' % ext))
+        want = {'name': 'k', 'audio': {'card': 'c', 'cases': {'x': {'dir': 'z', 'params': {'P': 1}},
+                                                            'y': {'dir': 'y'}}}}
+        if got != want:
+            bad.append('base profile (%s): got %s, want %s' % (ext, got, want))
     for x in bad:
         print('FAIL unit', x)
     print('selftest: %d unit problems' % len(bad))

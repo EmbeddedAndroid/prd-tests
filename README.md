@@ -198,7 +198,10 @@ The current matrix is in `results/matrix.md`; totals per platform:
 
 ## Adding a board
 
-Copy a profile in `boards/` and fill in what applies:
+Copy a profile in `boards/` and fill in what applies. A profile for the
+same board on another image can instead name the first one in `base`
+and give only what differs: its keys are merged over the base profile,
+dictionaries key by key.
 
 - `lava`: device type, image directory in the qcomflash tarball,
   storage, firehose programmer, rawprogram and patch files, shell
