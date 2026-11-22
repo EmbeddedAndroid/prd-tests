@@ -3,7 +3,8 @@ metadata:
     name: soundwire-status
     description: "SoundWire enumeration: every peripheral must be Attached and
       bound to a driver, no all-zero ID; minimum bus and peripheral counts;
-      optionally, a stream addresses attached peripherals only."
+      optionally, a stream addresses attached peripherals only and the
+      peripherals of a driver survive unbind and bind."
     maintainer:
         - tyler.baker@oss.qualcomm.com
     os:
@@ -21,9 +22,11 @@ params:
     STREAM_MIXER: ""
     STREAM_COUNT: "10"
     STREAM_XFER_PROBE: ""
+    REBIND_DRIVER: ""
+    REBIND_COUNT: "20"
 
 run:
     steps:
         - cd ./automated/linux/soundwire-status/
-        - ./soundwire-status.sh -m "${MIN_MASTERS}" -p "${MIN_PERIPHERALS}" -W "${WAIT_SECONDS}" -c "${CARD}" -s "${STREAM_PCM}" -x "${STREAM_MIXER}" -n "${STREAM_COUNT}" -X "${STREAM_XFER_PROBE}"
+        - ./soundwire-status.sh -m "${MIN_MASTERS}" -p "${MIN_PERIPHERALS}" -W "${WAIT_SECONDS}" -c "${CARD}" -s "${STREAM_PCM}" -x "${STREAM_MIXER}" -n "${STREAM_COUNT}" -X "${STREAM_XFER_PROBE}" -b "${REBIND_DRIVER}" -r "${REBIND_COUNT}"
         - ../../utils/send-to-lava.sh ./output/result.txt

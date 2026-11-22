@@ -14,8 +14,11 @@
 # transfers are counted with a kprobe event on STREAM_XFER_PROBE, the bus
 # controller's transfer op (its 2nd argument is the struct sdw_msg; the
 # exported sdw_transfer can be inlined inside the SoundWire core and miss
-# calls); skipped without kprobe events. Skipped when the kernel has no
-# SoundWire bus.
+# calls); skipped without kprobe events. With REBIND_DRIVER, every
+# peripheral bound to that SoundWire driver is unbound and bound again
+# REBIND_COUNT times; an oops, a warning or a runtime PM imbalance in the
+# kernel log, or a peripheral left unbound, fails soundwire-rebind.
+# Skipped when the kernel has no SoundWire bus.
 
 # shellcheck disable=SC1091
 . ../../lib/sh-test-lib
@@ -33,8 +36,10 @@ STREAM_PCM=""
 STREAM_MIXER=""
 STREAM_COUNT="10"
 STREAM_XFER_PROBE=""
+REBIND_DRIVER=""
+REBIND_COUNT="20"
 
-while getopts "m:p:W:c:s:x:n:X:h" o; do
+while getopts "m:p:W:c:s:x:n:X:b:r:h" o; do
     case "$o" in
         m) MIN_MASTERS="${OPTARG}" ;;
         p) MIN_PERIPHERALS="${OPTARG}" ;;
@@ -44,8 +49,11 @@ while getopts "m:p:W:c:s:x:n:X:h" o; do
         x) STREAM_MIXER="${OPTARG}" ;;
         n) STREAM_COUNT="${OPTARG}" ;;
         X) STREAM_XFER_PROBE="${OPTARG}" ;;
+        b) REBIND_DRIVER="${OPTARG}" ;;
+        r) REBIND_COUNT="${OPTARG}" ;;
         h|*) echo "Usage: $0 [-m <min buses>] [-p <min peripherals>] [-W <s>]" 1>&2
-             echo "          [-c <card>] [-s <stream PCM>] [-x '<ctl>=<v>;...'] [-n <streams>] [-X <xfer op>]" 1>&2; exit 1 ;;
+             echo "          [-c <card>] [-s <stream PCM>] [-x '<ctl>=<v>;...'] [-n <streams>] [-X <xfer op>]" 1>&2
+             echo "          [-b <driver to rebind>] [-r <cycles>]" 1>&2; exit 1 ;;
     esac
 done
 
@@ -141,6 +149,55 @@ stream_case() {
     fi
 }
 [ -n "${STREAM_PCM}" ] && stream_case
+
+# sysfs_write <value> <file>: write in the background and give up after
+# 20 s, since a write stuck in the kernel cannot be killed
+sysfs_write() {
+    local pid w=0
+    echo "$1" > "$2" &
+    pid=$!
+    while kill -0 "${pid}" 2>/dev/null; do
+        [ "${w}" -ge 40 ] && return 1
+        sleep 0.5
+        w=$((w + 1))
+    done
+    wait "${pid}"
+}
+
+# rebind_case: unbind and bind the peripherals of REBIND_DRIVER
+rebind_case() {
+    local d="/sys/bus/soundwire/drivers/${REBIND_DRIVER}"
+    local bad='Unable to handle|Oops|BUG:|WARNING:|Unbalanced pm_runtime|Call trace'
+    local devs p i ndev nb b0
+    devs="$(cd "${d}" 2>/dev/null && ls -d sdw:* 2>/dev/null)"
+    if [ -z "${devs}" ]; then
+        info_msg "no peripheral bound to ${REBIND_DRIVER}"
+        report_skip "soundwire-rebind"
+        return
+    fi
+    ndev="$(echo ${devs} | wc -w)"
+    b0="$(dmesg | grep -cE "${bad}")"
+    i=0
+    while [ "${i}" -lt "${REBIND_COUNT}" ]; do
+        for p in ${devs}; do sysfs_write "${p}" "${d}/unbind" || break 2; done
+        # past a typical 3 s autosuspend delay, where leaked runtime PM bites
+        sleep 4
+        for p in ${devs}; do sysfs_write "${p}" "${d}/bind" || break 2; done
+        sleep 4
+        nb=0
+        for p in ${devs}; do [ -e "${d}/${p}" ] && nb=$((nb + 1)); done
+        [ "${nb}" -eq "${ndev}" ] && [ "$(dmesg | grep -cE "${bad}")" -eq "${b0}" ] || break
+        i=$((i + 1))
+    done
+    info_msg "${i} of ${REBIND_COUNT} unbind/bind cycles of ${ndev} ${REBIND_DRIVER} peripherals clean"
+    if [ "${i}" -eq "${REBIND_COUNT}" ]; then
+        report_pass "soundwire-rebind"
+    else
+        dmesg | grep -E -A20 "${bad}" | head -60
+        report_fail "soundwire-rebind"
+    fi
+}
+[ -n "${REBIND_DRIVER}" ] && rebind_case
 
 add_metric "soundwire-buses" "$([ "${masters}" -ge "${MIN_MASTERS}" ] && echo pass || echo fail)" "${masters}" count
 add_metric "soundwire-peripherals" "$([ "${n}" -ge "${MIN_PERIPHERALS}" ] && echo pass || echo fail)" "${n}" count
