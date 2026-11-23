@@ -24,7 +24,8 @@ needs, so a case that passes nothing is missing hardware: skip where the
 profile lists hw as absent, fail otherwise), case_env (environment for
 every case), ucm ({verb, devices}: the UCM verb and devices the board
 ships; without a UCM configuration the UCM test fails instead of
-skipping)."""
+skipping; speaker and mic name the UCM devices whose PCMs the boot
+route test plays and records, default Speaker and Mic)."""
 import json
 import math
 import os
@@ -35,6 +36,7 @@ import struct
 import subprocess
 import tempfile
 import time
+import wave
 
 from prd.core import Missing, have, read, sh, test
 
@@ -145,6 +147,9 @@ class Audio:
         self.cdev = self.find('c', self.cfg.get('capture'))
         rc, out = sh('amixer -c %d controls' % self.card)
         self.ctls = re.findall(r"name='([^']*)'", out)
+        # the mixer as the first audio test finds it (audio.boot_route)
+        self.boot_state = self.f('boot.state')
+        sh('alsactl -U -f %s store %d' % (self.boot_state, self.card))
         self._sil = None
         print('ALSA card %d %s (%s), %d PCMs, %d controls, play dev %s capture dev %s' % (
             self.card, c['id'], c['driver'], len(self.pcm), len(self.ctls), self.pdev, self.cdev),
@@ -400,6 +405,119 @@ def t_pipewire(env):
                 len(sinks), sinks, len(srcs), srcs,
                 '; not counted (no device): %s' % other if other else ''),
             {'sinks': len(sinks), 'sources': len(srcs)})
+
+
+def wav_write(path, raw, ch=2):
+    with wave.open(path, 'wb') as w:
+        w.setnchannels(ch)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes(open(raw, 'rb').read())
+    return path
+
+
+def wav_level(path, freq, skip=0.5):
+    """level() of a WAV recording; a recorder stopped by a signal may
+    leave the header sizes at zero, then the data follows the header."""
+    raw = path + '.raw'
+    with wave.open(path, 'rb') as w:
+        d = w.readframes(w.getnframes())
+    if not d:
+        d = open(path, 'rb').read()[44:]
+    open(raw, 'wb').write(d)
+    return level(raw, freq, skip)
+
+
+def ucm_pcm(card, verb, dev, key):
+    """PCM device number UCM gives for key (PlaybackPCM, CapturePCM) of a
+    device. Setting the verb runs its enable sequence."""
+    rc, out = sh('alsaucm -c hw:%d set _verb %s get %s/%s 2>/dev/null' % (card, verb, key, dev), timeout=20)
+    m = re.search(r'hw:[^,\s]+,(\d+)', out)
+    return int(m.group(1)) if m else None
+
+
+def pcm_idle(card, d, dev, secs=20):
+    """Wait for a PCM to close (PipeWire suspends an idle node after a few
+    seconds); True when it did."""
+    st = '/proc/asound/card%d/pcm%d%s/sub0/status' % (card, dev, d)
+    for _ in range(secs):
+        if 'closed' in read(st, 'closed'):
+            return True
+        time.sleep(1)
+    return False
+
+
+@test('audio.boot_route')
+def t_boot_route(env):
+    """After boot, with no mixer setup: a tone played through PipeWire and on the speaker PCM is heard on the microphones"""
+    a = A(env)
+    lb = a.cfg.get('loopback')
+    if not lb:
+        raise Missing('no speaker-to-microphone loopback route in the board profile '
+                      '(audio.loopback)', hw='audio-loopback')
+    freq, min_db = lb.get('freq', 1000), lb.get('min_db', 15.0)
+    want = a.cfg.get('ucm') or {}
+    verb = want.get('verb', 'HiFi')
+    pdev, cdev = ucm_pcm(a.card, verb, want.get('speaker', 'Speaker'), 'PlaybackPCM'), \
+        ucm_pcm(a.card, verb, want.get('mic', 'Mic'), 'CapturePCM')
+    src = 'UCM'
+    if pdev is None or cdev is None:
+        pdev, cdev, src = a.pdev, a.cdev, 'profile'
+    # -U: a restore through UCM saves its control remap as the card's
+    # default control, and lookups through it fail for the other tests
+    sh('alsactl -U -f %s restore %d' % (a.boot_state, a.card))
+    src_tone = tone(a.f('boot-tone.raw'), freq, 3)
+    parts, meas = [], {}
+    if have('pw-play') and have('pw-record'):
+        e = dict(os.environ, PIPEWIRE_RUNTIME_DIR=env.cfg('audio', 'pipewire_runtime',
+                                                           default='/run/pipewire'))
+        def rec(path, secs):
+            return subprocess.Popen(['timeout', str(secs), 'pw-record', '--rate', str(RATE),
+                                     '--channels', '2', '--format', 's16', path], env=e,
+                                    stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        rec(a.f('pw-sil.wav'), 4).wait()
+        r = rec(a.f('pw-cap.wav'), 5)
+        time.sleep(0.5)
+        p = subprocess.run(['timeout', '10', 'pw-play', wav_write(a.f('boot-tone.wav'), src_tone)],
+                           env=e, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        r.wait()
+        try:
+            lv, base = wav_level(a.f('pw-cap.wav'), freq), wav_level(a.f('pw-sil.wav'), freq)
+        except (OSError, EOFError, wave.Error) as x:
+            lv, base = None, None
+            parts.append(('pipewire', False, 'no recording: %s' % x))
+        if lv is not None:
+            ok = p.returncode == 0 and lv - base >= min_db
+            parts.append(('pipewire', ok, 'pw-play rc %d, tone %.1f dBFS over %.1f dBFS' % (
+                p.returncode, lv, base)))
+            meas['pipewire_db'] = round(lv - base, 1)
+    else:
+        parts.append(('pipewire', None, 'pw-play/pw-record not on the image'))
+    if pdev is None or cdev is None:
+        parts.append(('alsa', False, 'no speaker or microphone PCM (UCM or profile)'))
+    else:
+        idle = pcm_idle(a.card, 'p', pdev) and pcm_idle(a.card, 'c', cdev)
+        # a capture PCM that does not open leaves no file: no signal
+        def lvl(path):
+            return level(path, freq, 1.0) if os.path.exists(path) else -200.0
+        cap = a.f('alsa-sil.raw')
+        a.record(cap, 3, dev=cdev).communicate()
+        base = lvl(cap)
+        cap = a.f('alsa-cap.raw')
+        r = a.record(cap, 4, dev=cdev)
+        time.sleep(0.5)
+        p = a.play(src_tone, dev=pdev)
+        out = p.communicate()[0].decode(errors='replace')
+        r.communicate()
+        lv = lvl(cap)
+        ok = p.returncode == 0 and lv - base >= min_db
+        parts.append(('alsa', ok, 'hw:%d,%d (%s) rc %d%s, tone %.1f dBFS over %.1f dBFS%s' % (
+            a.card, pdev, src, p.returncode, ' ' + out.strip()[-120:] if p.returncode else '',
+            lv, base, '' if idle else '; a PCM stayed open')))
+        meas['alsa_db'] = round(lv - base, 1)
+    bad = [n for n, ok, _ in parts if ok is False]
+    st = 'fail' if bad else 'pass' if all(ok for _, ok, _ in parts) else 'partial'
+    return st, '; '.join('%s: %s' % (n, w) for n, _, w in parts), meas
 
 
 # ---- shell test-definition cases

@@ -326,6 +326,9 @@ requirements:
     tests:
     - {test: platform.in_tree, args: {cls: sound}}
     - {test: audio.case, args: {case: drivers}}
+  GAU-037:
+    title: "Speaker and microphones work after boot with no mixer setup"
+    test: audio.boot_route
   GVI-001:
     title: "V4L2 decoder"
     test: video.codec
