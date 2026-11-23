@@ -176,6 +176,19 @@ def check_units():
         on, nf = st.onset(1000, 15.0, int(0.5 * rate))
         if on is None or not 0.45 * rate <= on <= 0.6 * rate:
             bad.append('onset: got frame %s, want about %d' % (on, rate // 2))
+    if au is not None:
+        # PipeWire: the session manager's dummy sink carries no device.id
+        dump = json.dumps([
+            {'type': 'PipeWire:Interface:Node', 'info': {'props': {
+                'media.class': 'Audio/Sink', 'node.name': 'auto_null'}}},
+            {'type': 'PipeWire:Interface:Node', 'info': {'props': {
+                'media.class': 'Audio/Source', 'node.name': 'mic', 'device.id': 47}}}])
+        sh0 = au.sh
+        au.sh = lambda cmd, timeout=None: (0, dump)
+        got = au.pw_nodes(core.Env({}))
+        if got != [('Audio/Sink', 'auto_null', False), ('Audio/Source', 'mic', True)]:
+            bad.append('pw_nodes: got %s' % got)
+        au.sh = sh0
     # codec roles from the formats an Iris decoder and encoder report:
     # the UBWC raw formats (Q08C, Q10C) carry the compressed flag
     from prd import v4l2

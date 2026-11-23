@@ -23,6 +23,7 @@ case under tests/audio/test-definitions; hw names the hardware the case
 needs, so a case that passes nothing is missing hardware: skip where the
 profile lists hw as absent, fail otherwise), case_env (environment for
 every case)."""
+import json
 import math
 import os
 import pty
@@ -346,21 +347,48 @@ def t_ucm(env):
         verbs, verbs[0], devs or dv.strip()[-120:]), {'verbs': verbs, 'devices': devs})
 
 
+def pw_env(env):
+    return 'PIPEWIRE_RUNTIME_DIR=%s' % env.cfg('audio', 'pipewire_runtime', default='/run/pipewire')
+
+
+def pw_nodes(env):
+    """[(media.class, node.name, device backed)] of the PipeWire audio
+    sinks and sources. A node a device created (ALSA, Bluetooth) carries
+    device.id; the session manager's fallback sink (Dummy Output) does not."""
+    rc, out = sh('%s pw-dump 2>/dev/null' % pw_env(env), timeout=20)
+    try:
+        objs = json.loads(out)
+    except ValueError:
+        return None
+    nodes = []
+    for o in objs:
+        p = (o.get('info') or {}).get('props') or {}
+        if o.get('type', '').endswith(':Node') and p.get('media.class') in ('Audio/Sink', 'Audio/Source'):
+            nodes.append((p['media.class'], p.get('node.name', '?'), 'device.id' in p))
+    return nodes
+
+
 @test('audio.pipewire')
 def t_pipewire(env):
-    """PipeWire: the sound server runs and exposes audio sinks and sources"""
-    if not have('pw-cli'):
-        raise Missing('PipeWire (pw-cli) not on the image', hw='pipewire')
-    e = 'PIPEWIRE_RUNTIME_DIR=%s' % env.cfg('audio', 'pipewire_runtime', default='/run/pipewire')
-    rc, out = sh('%s pw-cli ls Node 2>&1' % e, timeout=20)
+    """PipeWire: the sound server runs and exposes sound card sinks and sources"""
+    if not have('pw-cli') or not have('pw-dump'):
+        raise Missing('PipeWire (pw-cli, pw-dump) not on the image', hw='pipewire')
+    rc, out = sh('%s pw-cli info 0 2>&1' % pw_env(env), timeout=20)
     if rc and 'connect' in out.lower():
         raise Missing('no PipeWire daemon to connect to: %s' % out.strip()[-120:], hw='pipewire')
-    sinks = len(re.findall(r'media.class = "Audio/Sink"', out))
-    srcs = len(re.findall(r'media.class = "Audio/Source"', out))
     if rc:
         return 'fail', 'pw-cli rc %d: %s' % (rc, out.strip()[-200:])
-    return ('pass' if sinks and srcs else 'fail', 'PipeWire nodes: %d audio sinks, %d audio sources'
-            % (sinks, srcs), {'sinks': sinks, 'sources': srcs})
+    nodes = pw_nodes(env)
+    if nodes is None:
+        return 'fail', 'pw-dump gave no node list'
+    sinks = [n for c, n, dev in nodes if dev and c == 'Audio/Sink']
+    srcs = [n for c, n, dev in nodes if dev and c == 'Audio/Source']
+    other = [n for c, n, dev in nodes if not dev]
+    return ('pass' if sinks and srcs else 'fail',
+            'PipeWire nodes of sound devices: %d audio sinks %s, %d audio sources %s%s' % (
+                len(sinks), sinks, len(srcs), srcs,
+                '; not counted (no device): %s' % other if other else ''),
+            {'sinks': len(sinks), 'sources': len(srcs)})
 
 
 # ---- shell test-definition cases
