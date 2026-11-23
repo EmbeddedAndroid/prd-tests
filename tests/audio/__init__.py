@@ -22,7 +22,9 @@ cases ({name: {dir, params, hw}}: the parameters of a shell test-definition
 case under tests/audio/test-definitions; hw names the hardware the case
 needs, so a case that passes nothing is missing hardware: skip where the
 profile lists hw as absent, fail otherwise), case_env (environment for
-every case)."""
+every case), ucm ({verb, devices}: the UCM verb and devices the board
+ships; without a UCM configuration the UCM test fails instead of
+skipping)."""
 import json
 import math
 import os
@@ -334,17 +336,26 @@ def t_compress_codec(env, codec, label=None):
 def t_ucm(env):
     """UCM: the card has a use case configuration with verbs and devices"""
     a = A(env)
+    want = a.cfg.get('ucm') or {}
     if not have('alsaucm'):
         return 'fail', 'alsaucm not on the image'
     rc, out = sh('alsaucm -c hw:%d list _verbs 2>&1' % a.card, timeout=20)
     verbs = re.findall(r'^\s*\d+:\s*(\S+)', out, re.M)
     if rc or not verbs:
-        raise Missing('no UCM configuration for card %s: %s' % (a.info['id'], out.strip()[-200:]),
-                      hw='ucm')
-    rc, dv = sh('alsaucm -c hw:%d set _verb %s list _devices 2>&1' % (a.card, verbs[0]), timeout=20)
+        why = 'no UCM configuration for card %s: %s' % (a.info['id'], out.strip()[-200:])
+        if want:
+            return 'fail', why
+        raise Missing(why, hw='ucm')
+    verb = want.get('verb', verbs[0])
+    if verb not in verbs:
+        return 'fail', 'UCM verbs %s lack %s' % (verbs, verb), {'verbs': verbs}
+    rc, dv = sh('alsaucm -c hw:%d set _verb %s list _devices 2>&1' % (a.card, verb), timeout=20)
     devs = re.findall(r'^\s*\d+:\s*(\S+)', dv, re.M)
+    lack = [d for d in want.get('devices') or [] if d not in devs]
+    if lack:
+        return 'fail', 'UCM devices of %s %s lack %s' % (verb, devs, lack), {'verbs': verbs, 'devices': devs}
     return ('pass' if devs else 'partial', 'UCM verbs %s; devices of %s: %s' % (
-        verbs, verbs[0], devs or dv.strip()[-120:]), {'verbs': verbs, 'devices': devs})
+        verbs, verb, devs or dv.strip()[-120:]), {'verbs': verbs, 'devices': devs})
 
 
 def pw_env(env):

@@ -188,7 +188,21 @@ def check_units():
         got = au.pw_nodes(core.Env({}))
         if got != [('Audio/Sink', 'auto_null', False), ('Audio/Source', 'mic', True)]:
             bad.append('pw_nodes: got %s' % got)
-        au.sh = sh0
+        # UCM: a board that ships a profile fails without one, else skips
+        class FakeAudio:
+            card, info, cfg = 0, {'id': 'c'}, {'ucm': {'verb': 'HiFi'}}
+        a0, have0 = au.A, au.have
+        au.A, au.have = (lambda env: FakeAudio()), (lambda tool: True)
+        au.sh = lambda cmd, timeout=None: (1, 'failed to import hw:0 use case configuration -2')
+        for cfg, want in (({'ucm': {'verb': 'HiFi'}}, 'fail'), ({}, 'Missing')):
+            FakeAudio.cfg = cfg
+            try:
+                got = au.t_ucm(core.Env({}))[0]
+            except core.Missing:
+                got = 'Missing'
+            if got != want:
+                bad.append('ucm missing, profile %s: got %s, want %s' % (cfg, got, want))
+        au.sh, au.A, au.have = sh0, a0, have0
     # codec roles from the formats an Iris decoder and encoder report:
     # the UBWC raw formats (Q08C, Q10C) carry the compressed flag
     from prd import v4l2
