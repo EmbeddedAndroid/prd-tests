@@ -31,6 +31,7 @@ display:
 audio:
   card: eliza-cqs-evk
   dsp: adsp
+  ucm: {verb: HiFi, devices: [Speaker, Mic]}
   play:
     pcm: MultiMedia2
     mixer: &spk WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia1=0;WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia5=0;WSA_CODEC_DMA_RX_0 Audio Mixer MultiMedia2=1;WSA RX0 MUX=AIF1_PB;WSA RX1 MUX=AIF1_PB;WSA_RX0 INP0=RX0;WSA_RX1 INP0=RX1;WSA_RX0 Digital Volume=81;WSA_RX1 Digital Volume=81;WSA_COMP1 Switch=0;WSA_COMP2 Switch=0;SpkrLeft PA Volume=12;SpkrRight PA Volume=12;SpkrLeft COMP Switch=1;SpkrLeft BOOST Switch=1;SpkrLeft DAC Switch=1;SpkrLeft PBR Switch=1;SpkrLeft VISENSE Switch=0;SpkrLeft WSA MODE=0;SpkrRight COMP Switch=1;SpkrRight BOOST Switch=1;SpkrRight DAC Switch=1;SpkrRight PBR Switch=1;SpkrRight VISENSE Switch=0;SpkrRight WSA MODE=0

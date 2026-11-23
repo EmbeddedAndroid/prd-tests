@@ -11,6 +11,8 @@ lava:
   image_dir: qcom-multimedia-proprietary-image-eliza-evk-emmc-open-fw
 
 audio:
+  # PAL, not UCM, configures the card here
+  ucm: null
   cases:
     latency:
       dir: pal-latency
