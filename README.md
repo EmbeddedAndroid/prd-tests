@@ -230,13 +230,20 @@ dictionaries key by key.
   `client` gives its command line (`cmd`, with `{cmdfile}`), working
   directory (`cwd`, where it writes images), `env`, `timeout`, the
   error summary counters it may report (`errors_max`) and its
-  `commands` (command file text, image size and globs) and the
-  patterns of its `orientation` and `fps` reports; `icps` lists the
-  ICPs whose firmware log the tests read; `sensors` the sensors
-  (`connector`, `name` and `slot` as the kernel driver logs the
-  probe, mounting `roll`, the `raw` command and its `width`,
-  `height` and RAW10 `stride`). A sensor not fitted is listed under
-  `absent` as `camera-sensor-<connector>`.
+  `commands` (command file text, image size and globs), the command
+  that makes CamX probe the sensors when nothing opened the stack yet
+  (`probe`, default `snapshot`) and the patterns of its `orientation`
+  (a roll, or a camera id and a roll) and `fps` reports; `icps` lists
+  the ICPs whose firmware log the tests read and `firmware` their
+  files; `gdsc` names the camera power domain as the genpd summary
+  lists it (it must power off within `gdsc_off_s` seconds of a close,
+  default 10); `sensors` the sensors (`connector`, `name` and `slot`
+  as the kernel driver logs the probe, the client's `camera` id,
+  mounting `roll`, the `raw` command and its `width`, `height` and
+  RAW10 `stride`). A sensor not fitted is listed under `absent` as
+  `camera-sensor-<connector>`. `camx.power` with `boot` measures only
+  the first camera use of a boot: run its requirement alone right
+  after a reboot (it is partial otherwise).
 - `modules`: optional vendor modules (`audioreach`, `camx`).
 - `targets`: numbers this board must reach, by row ID, in the target
   syntax below; they replace the row's own target.

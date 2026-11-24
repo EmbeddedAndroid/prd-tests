@@ -350,6 +350,17 @@ requirements:
   QCA-014:
     title: "CamX ISP preview frame rate"
     test: camx.fps
+  QCA-015:
+    title: "CamX ICP firmware load through the TEE PAS"
+    test: camx.icp_fw
+  QCA-016:
+    title: "CamX power cycle across repeated opens"
+    test: camx.power
+    args: {runs: 3}
+  QCA-017:
+    title: "CamX power up after a reboot"
+    test: camx.power
+    args: {runs: 1, boot: true}
   QPL-001:
     title: "Remote processors running"
     test: platform.remoteproc

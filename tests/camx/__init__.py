@@ -997,3 +997,108 @@ def t_fps(env, command='snapshot'):
         prob.append('fps %.2f below 90%% of %s' % (got[-1], cmd['fps']))
     return ('fail' if prob else 'pass', 'command %s: fps %s%s' % (
         command, meas['fps'], '; ' + '; '.join(prob) if prob else ''), meas)
+
+
+# ICP firmware and camera power (camx.firmware, camx.gdsc: the camera
+# top power domain as the genpd summary names it).
+GENPD = '/sys/kernel/debug/pm_genpd/pm_genpd_summary'
+
+
+def gdsc_state(env):
+    """on, off, or None when the profile names no domain or the genpd
+    summary does not list it."""
+    name = env.cfg('camx', 'gdsc', default=None)
+    for l in read(GENPD).splitlines() if name else []:
+        f = l.split()
+        if len(f) > 1 and f[0] == name:
+            return 'off' if f[1].startswith('off') else f[1]
+    return None
+
+
+def wait_gdsc_off(env):
+    """(state, seconds waited) once the domain is off or after camx.gdsc_off_s."""
+    limit, t0 = float(env.cfg('camx', 'gdsc_off_s', default=10)), time.time()
+    while True:
+        st = gdsc_state(env)
+        if st != 'on' or time.time() - t0 >= limit:
+            return st, round(time.time() - t0, 1)
+        time.sleep(0.5)
+
+
+@test('camx.icp_fw')
+def t_icp_fw(env, command='snapshot'):
+    """CamX ICP firmware: every ICP loads its firmware through the TEE PAS and boots it; the version is recorded"""
+    need(env, 'CamX ICP firmware load')
+    icps = env.cfg('camx', 'icps', default=None) or []
+    if not icps:
+        raise Missing('the board profile lists no ICPs (camx.icps)', hw='camx')
+    prob = ['%s is not on the image' % f for f in env.cfg('camx', 'firmware', default=None) or []
+            if not os.path.exists(f)]
+    run = run_client(env, command, trace=True)
+    run.cleanup()
+    log = klog()
+    for i in icps:
+        if not re.search(r'\[%s\] FW download done successfully' % re.escape(i), log):
+            prob.append('no "[%s] FW download done" in the kernel log' % i)
+    pas = len(re.findall(r'\[sec-PIL\] Loaded MBN firmware', log))
+    if not pas:
+        prob.append('no "[sec-PIL] Loaded MBN firmware" (not loaded through the TEE PAS)')
+    auth = re.findall(r'auth and reset failed rc=(-?\d+)', log)
+    if auth:
+        prob.append('%d PAS auth and reset failures (rc %s)' % (len(auth), ','.join(sorted(set(auth)))))
+    fw = parse_fw(run.fw) if run.fw is not None else None
+    meas = dict(run.meas(), pas_loads=pas, icps=len(icps), fw_version=fw['version'] if fw else None)
+    what = '%d ICPs (%s), %d secure loads' % (len(icps), ' '.join(icps), pas)
+    if prob:
+        return 'fail', '%s: %s' % (what, '; '.join(prob)), meas
+    notes = fw_notes(env, run)
+    if fw and not fw['version']:
+        notes.append('no version string in the ICP firmware log')
+    if notes:
+        return 'partial', '%s; firmware version not read: %s' % (what, '; '.join(notes)), meas
+    return 'pass', '%s; firmware %s' % (what, meas['fw_version']), meas
+
+
+def cycles(env, command, runs, kinds=('jpeg', 'yuv')):
+    """runs client runs, each from a powered down camera (the domain must
+    go off after every close); (status, reason, measurements)."""
+    prob, meas, unread = [], {'runs': runs, 'clean': 0, 'gdsc_off': 0}, []
+    for i in range(runs + 1):
+        st, waited = wait_gdsc_off(env)
+        if st is None:
+            unread.append('the power state of camx.gdsc %s is not in %s' % (
+                env.cfg('camx', 'gdsc', default='(not set)'), GENPD))
+        elif st == 'on':
+            prob.append('%s still on %.0f s %s (no power collapse)' % (
+                env.cfg('camx', 'gdsc'), waited, 'after run %d' % i if i else 'before the first run'))
+            break
+        else:
+            meas['gdsc_off'] += 1
+        if i == runs:
+            break
+        p, m, notes, _ = isp(env, command, kinds)
+        unread += notes
+        meas.update(m)
+        if p:
+            prob.append('run %d of %d: %s' % (i + 1, runs, '; '.join(p)))
+            break
+        meas['clean'] += 1
+    what = '%d of %d runs of %s clean, power domain off %d times' % (meas['clean'], runs, command,
+                                                                     meas['gdsc_off'])
+    if prob:
+        return 'fail', '%s: %s' % (what, '; '.join(prob)), meas
+    if unread:
+        return 'partial', '%s; %s' % (what, '; '.join(sorted(set(unread)))), meas
+    return 'pass', what, meas
+
+
+@test('camx.power')
+def t_power(env, runs=3, command='snapshot', boot=False):
+    """CamX power cycle: repeated client runs, each clean, with the camera power domain off between them (boot: the first camera use of this boot)"""
+    need(env, 'CamX power cycle')
+    client(env)
+    command_cfg(env, command)
+    if boot and re.search(r'FW download done', klog()):
+        return 'partial', 'the camera was already opened in this boot (ICP firmware download in the kernel ' \
+            'log); run this requirement first after a reboot to measure it'
+    return cycles(env, command, int(runs))

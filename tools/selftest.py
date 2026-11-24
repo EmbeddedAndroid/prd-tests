@@ -511,6 +511,7 @@ def check_camx_client():
                 bad.append('camx run_client %s: %s' % (b, e))
     bad += check_camx_sensors(cx, td)
     bad += check_camx_isp(cx, td)
+    bad += check_camx_power(cx, td)
     return bad
 
 
@@ -712,6 +713,86 @@ def check_camx_isp(cx, td):
             bad.append('camx.fps without a rate in the log: %s %s' % (got, why))
     finally:
         cx.Trace = tr0
+    return bad
+
+
+GENPD = ('''domain                          status          children        performance
+    /device                         runtime status  managed by
+------------------------------------------------------------------------------
+cam_top_gdsc                    off-0                           0
+cam_top_gdsc_b                  on                              0
+''')
+KLOG_ICP = ('''CAM_INFO: CAM-ICP: __load_firmware: 100: [sec-PIL] Loaded MBN firmware from disk
+CAM_INFO: CAM-ICP: cam_icp_mgr_hw_open: 200: [icpa] FW download done successfully
+CAM_INFO: CAM-ICP: __load_firmware: 100: [sec-PIL] Loaded MBN firmware from disk
+CAM_INFO: CAM-ICP: cam_icp_mgr_hw_open: 200: [icpb] FW download done successfully
+''')
+KLOG_AUTH = ('''CAM_INFO: CAM-ICP: __load_firmware: 100: [sec-PIL] Loaded MBN firmware from disk
+CAM_INFO: CAM-ICP: cam_icp_mgr_hw_open: 200: [icpa] FW download done successfully
+CAM_ERR: CAM-ICP: cam_icp_v2_boot: 300: auth and reset failed rc=-5
+''')
+
+
+def check_camx_power(cx, td):
+    """Power domain state, the power cycle rule and the ICP firmware load:
+    a domain that never powers off between runs fails, and so does a
+    run that stalls after clean ones."""
+    bad = []
+    rd0, gs0, kl0, tr0 = cx.read, cx.gdsc_state, cx.klog, cx.Trace
+    cx.read = lambda path, default='': GENPD if path == cx.GENPD else rd0(path, default)
+    try:
+        got = [cx.gdsc_state(core.Env({'camx': {'gdsc': n}})) for n in ('cam_top_gdsc', 'cam_top_gdsc_b', 'x')]
+    finally:
+        cx.read = rd0
+    if got != ['off', 'on', None]:
+        bad.append('camx gdsc_state: %s' % got)
+    cwd = os.path.join(td, 'pw-out')
+    os.makedirs(cwd, exist_ok=True)
+    cmd = fake_client(td, 'cp %s snapshot_w[64]_h[48]_id[0]_x.jpg; cp %s "preview_w[64]_h[48]_id[0]_x.yuv"\n' % (
+        os.path.join(td, 'good.jpg'), os.path.join(td, 'good.yuv')))
+    b = {'modules': {'camx': True}, 'camx': {'icps': ['icpa', 'icpb'], 'gdsc': 'cam_top_gdsc', 'gdsc_off_s': 0,
+                                             'client': {'cmd': cmd, 'cwd': cwd, 'commands': {'snapshot': {
+                                                 'file': 'Q', 'width': 64, 'height': 48}}}}}
+    cx.Trace = FakeTrace
+    try:
+        for states, fws, args, want, word in (
+                (['off'] * 4, [FW_GOOD] * 3, {}, 'pass', '3 of 3 runs'),
+                (['off', 'on'], [FW_GOOD] * 3, {}, 'fail', 'still on 0 s after run 1'),
+                (['on'], [FW_GOOD], {}, 'fail', 'before the first run'),
+                (['off'] * 4, [FW_GOOD, FW_STALL, FW_GOOD], {}, 'fail', 'run 2 of 3'),
+                ([None] * 4, [FW_GOOD] * 3, {}, 'partial', 'is not in'),
+                (['off'] * 2, [FW_GOOD], {'runs': 1, 'boot': True}, 'pass', '1 of 1 runs')):
+            st = list(states)
+            cx.gdsc_state = lambda env: st.pop(0) if st else 'off'
+            cx.klog = lambda since=None: ''
+            FakeTrace.log = list(fws)
+            got, why, meas = core.Runner(core.Env(b), td).call('camx.power', args)
+            if got != want or word not in why:
+                bad.append('camx.power %s %s: got %s %s, want %s' % (states, args, got, why[:160], want))
+        cx.klog = lambda since=None: KLOG_ICP
+        got, why, _ = core.Runner(core.Env(b), td).call('camx.power', {'runs': 1, 'boot': True})
+        if got != 'partial' or 'already opened' not in why:
+            bad.append('camx.power boot after an earlier open: %s %s' % (got, why))
+        for log, fw, want, word in ((KLOG_ICP, FW_GOOD, 'pass', 'CICP.FW.1.0-00001'),
+                                    (KLOG_ICP, '', 'partial', 'no version string'),
+                                    (KLOG_ICP, None, 'partial', 'firmware log was not read'),
+                                    (KLOG_AUTH, FW_GOOD, 'fail', '[icpb] FW download'),
+                                    (KLOG_AUTH, FW_GOOD, 'fail', 'auth and reset failures (rc -5)'),
+                                    ('', FW_GOOD, 'fail', 'not loaded through the TEE PAS')):
+            cx.klog = lambda since=None: log
+            FakeTrace.log = [fw]
+            got, why, meas = core.Runner(core.Env(b), td).call('camx.icp_fw', {})
+            if got != want or word not in why:
+                bad.append('camx.icp_fw: got %s %s, want %s (%s)' % (got, why[:160], want, word))
+        cx.klog, FakeTrace.log, FakeTrace.drop = (lambda since=None: KLOG_ICP), [FW_GOOD], ['icpb']
+        got, why, meas = core.Runner(core.Env(b), td).call('camx.icp_fw', {})
+        FakeTrace.drop = []
+        if got != 'partial' or 'no firmware log from icpb' not in why or 'rc' not in meas:
+            bad.append('camx.icp_fw with one ICP untraced: %s %s' % (got, why[:160]))
+    finally:
+        cx.gdsc_state, cx.klog, cx.Trace = gs0, kl0, tr0
+    if os.listdir(cwd):
+        bad.append('camx power runs left %s' % os.listdir(cwd))
     return bad
 
 
