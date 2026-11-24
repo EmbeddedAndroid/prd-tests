@@ -364,6 +364,9 @@ requirements:
   QCA-018:
     title: "CamX ISP first frame after a camera power up"
     test: camx.first_frame
+  QCA-019:
+    title: "CamX missing ICP firmware fails cleanly"
+    test: camx.no_firmware
   QPL-001:
     title: "Remote processors running"
     test: platform.remoteproc

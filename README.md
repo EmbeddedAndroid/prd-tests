@@ -241,9 +241,10 @@ dictionaries key by key.
   as the kernel driver logs the probe, the client's `camera` id,
   mounting `roll`, the `raw` command and its `width`, `height` and
   RAW10 `stride`). A sensor not fitted is listed under `absent` as
-  `camera-sensor-<connector>`. `camx.power` with `boot` measures only
-  the first camera use of a boot: run its requirement alone right
-  after a reboot (it is partial otherwise).
+  `camera-sensor-<connector>`. `camx.power` with `boot` and
+  `camx.no_firmware` measure only the first camera use of a boot: run
+  each of their requirements alone right after a reboot, in a boot of
+  its own (they are partial otherwise).
 - `modules`: optional vendor modules (`audioreach`, `camx`).
 - `targets`: numbers this board must reach, by row ID, in the target
   syntax below; they replace the row's own target.

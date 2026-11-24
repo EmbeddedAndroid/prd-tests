@@ -810,6 +810,63 @@ def check_camx_power(cx, td):
         cx.gdsc_state, cx.klog, cx.Trace = gs0, kl0, tr0
     if os.listdir(cwd):
         bad.append('camx power runs left %s' % os.listdir(cwd))
+    bad += check_camx_no_firmware(cx, td, cmd)
+    return bad
+
+
+def check_camx_no_firmware(cx, td, good):
+    """Missing firmware: a client that fails at once with every file named
+    in the kernel log after the mark passes; one that hangs (SIGTERM,
+    SIGKILL or 137 from timeout(1)), succeeds or writes an image fails;
+    the files are always back afterwards, files an earlier run left
+    aside are put back first, and a boot that loaded the firmware
+    already is partial."""
+    bad = []
+    fwd = os.path.join(td, 'fw')
+    os.makedirs(fwd, exist_ok=True)
+    fws = [os.path.join(fwd, n) for n in ('icpa.bin', 'icpb.bin')]
+    for f in fws:
+        open(f, 'w').write('fw')
+    # the client fails while the firmware is away, works once it is back
+    script = fake_client(td, '[ -e %s ] && exec sh %s\n: > client.log\n'
+                             '[ "$MODE" = hang ] && sleep 30\n'
+                             '[ "$MODE" = deaf ] && trap "" TERM && sleep 30\n'
+                             '[ "$MODE" = killed ] && exit 137\n'
+                             '[ "$MODE" = img ] && : > x.jpg\n'
+                             '[ "$MODE" = ok ] && exit 0\nexit 1\n' % (fws[0], good.split()[1]), 'nofw.sh')
+    cwd = os.path.join(td, 'nofw-out')
+    os.makedirs(cwd, exist_ok=True)
+    kl0, mk0 = cx.klog, cx.mark
+    nofw = ''.join('Direct firmware load for vendor/%s failed with error -2\n' % n for n in ('icpa.bin', 'icpb.bin'))
+    try:
+        for mode, before, run_log, marked, aside, want, word in (
+                ('fail', '', nofw, True, False, 'pass', 'next run writes a JPEG'),
+                ('fail', '', nofw, True, True, 'pass', 'put back %s' % fws[1]),
+                ('hang', '', nofw, True, False, 'fail', 'hung'),
+                ('deaf', '', nofw, True, False, 'fail', 'hung'),
+                ('killed', '', nofw, True, False, 'fail', 'hung'),
+                ('ok', '', nofw, True, False, 'fail', 'exited 0'),
+                ('img', '', nofw, True, False, 'fail', 'wrote 1 images'),
+                ('fail', '', nofw.splitlines()[0], True, False, 'fail', 'names the missing icpb.bin'),
+                ('fail', '', nofw + '------------[ cut here ]------------\n', True, False, 'fail', 'cut here'),
+                ('fail', '', nofw, False, False, 'partial', 'cannot be told apart'),
+                ('fail', KLOG_ICP, nofw, True, False, 'partial', 'already loaded')):
+            state = []
+            cx.mark = lambda what: (state.append(1), 'MARK')[1] if marked else None
+            cx.klog = lambda: before + ('MARK\n' + run_log if state else '')
+            if aside:
+                os.rename(fws[1], fws[1] + cx.OFF)
+            b = {'modules': {'camx': True}, 'camx': {'firmware': fws, 'client': {
+                'cmd': script, 'cwd': cwd, 'env': {'MODE': mode}, 'timeout': 1,
+                'commands': {'snapshot': {'file': 'Q', 'width': 64, 'height': 48}}}}}
+            got, why, meas = core.Runner(core.Env(b), td).call('camx.no_firmware', {})
+            if got != want or word not in why or (want != 'partial' and 'rc' not in meas):
+                bad.append('camx.no_firmware %s: got %s %s, want %s (%s)' % (mode, got, why[:200], want, word))
+            if sorted(os.listdir(fwd)) != ['icpa.bin', 'icpb.bin'] or os.listdir(cwd):
+                bad.append('camx.no_firmware %s: firmware %s, images %s left' % (
+                    mode, os.listdir(fwd), os.listdir(cwd)))
+    finally:
+        cx.klog, cx.mark = kl0, mk0
     return bad
 
 

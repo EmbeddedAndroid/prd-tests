@@ -1118,3 +1118,101 @@ def t_first_frame(env, command='snapshot'):
     read, never a pass."""
     need(env, 'CamX ISP first frame after a power up')
     return cycles(env, command, 1, kinds=('jpeg',))
+
+
+OFF = '.prd-off'
+
+
+def restore(fws):
+    """Move back every file of fws that is aside (f + OFF, f absent), each
+    on its own, and sync; the [(file, error)] that could not be."""
+    errs = []
+    for f in fws:
+        if os.path.exists(f + OFF) and not os.path.exists(f):
+            try:
+                os.rename(f + OFF, f)
+            except OSError as e:
+                errs.append((f, e))
+    os.sync()
+    return errs
+
+
+@test('camx.no_firmware')
+def t_no_firmware(env, command='snapshot'):
+    """CamX missing ICP firmware: with the firmware moved aside the client fails cleanly within its timeout; the files are restored
+
+    Fails when the client hangs (still running at camx.client.timeout,
+    whether it then takes SIGTERM or needs SIGKILL), exits 0 or writes
+    an image of the command without its firmware, when the kernel log
+    of the run (after a mark the test writes) names not every missing
+    firmware file, on a kernel warning or oops in it, or when a file
+    cannot be put back. Files a crashed earlier run left aside are put
+    back first. Partial when the firmware was already loaded in this
+    boot (the driver keeps it across opens, so the missing file is never
+    read: run it alone first after a reboot), when the kernel log of the
+    run cannot be told apart, or when the run after the restore does not
+    give a JPEG again."""
+    need(env, 'CamX missing ICP firmware')
+    fws = env.cfg('camx', 'firmware', default=None) or []
+    if not fws:
+        raise Missing('the board profile lists no ICP firmware files (camx.firmware)', hw='camx')
+    client(env)
+    cmd = command_cfg(env, command)
+    left = [f for f in fws if os.path.exists(f + OFF) and not os.path.exists(f)]
+    errs = restore(left)
+    if errs:
+        return 'fail', 'could not put back firmware an earlier run left aside: %s' % (
+            '; '.join('%s: %s' % fe for fe in errs))
+    pre = 'put back %s left aside by an earlier run; ' % ' '.join(left) if left else ''
+    lost = [f for f in fws if not os.path.exists(f)]
+    if lost:
+        return 'fail', '%sfirmware not on the image: %s' % (pre, ' '.join(lost))
+    if re.search(r'Loaded MBN firmware|FW download done', klog()):
+        return 'partial', '%sthe ICP firmware was already loaded in this boot and the driver keeps it ' \
+            'across opens; run this requirement alone first after a reboot to measure it' % pre
+    m = mark('no_firmware')
+    moved = []
+    try:
+        for f in fws:
+            try:
+                os.rename(f, f + OFF)
+            except OSError as e:
+                return 'partial', '%scould not move %s aside: %s' % (pre, f, e)
+            moved.append(f)
+        run = run_client(env, command, trace=False)
+    finally:
+        errs = restore(moved)
+        if errs:
+            raise OSError('could not put the firmware back: %s' % '; '.join('%s: %s' % fe for fe in errs))
+    run.cleanup()
+    names = [os.path.basename(f) for f in fws]
+    imgs = [f for f in run.files if any(fnmatch.fnmatch(os.path.basename(f), cmd.get(k, d)) for k, d in (
+        ('jpeg', '*.jpg'), ('yuv', '*.yuv'), ('raw', '*.raw')))]
+    meas = dict(run.meas(), images=len(imgs))
+    what = '%sfirmware %s moved aside: client rc %d after %.1f s' % (pre, ' '.join(names), run.rc, run.seconds)
+    prob = []
+    if run.hung:
+        prob.append('the client hung without its firmware (%s)' % run.problems()[0])
+    elif run.rc == 0:
+        prob.append('the client exited 0 without its firmware')
+    if imgs:
+        prob.append('the client wrote %d images without its firmware' % len(imgs))
+    log = klog_after(m)
+    if log is not None:
+        lack = [n for n in names if n not in log]
+        if lack:
+            prob.append('no kernel log line of the run names the missing %s' % ' '.join(lack))
+        oops = sorted(set(re.findall(r'cut here|Oops|BUG:|hung_task', log)))
+        if oops:
+            prob.append('kernel %s during the run' % ', '.join(oops))
+    if prob:
+        return 'fail', '%s: %s' % (what, '; '.join(prob)), meas
+    if log is None:
+        return 'partial', '%s; the kernel log of the run cannot be told apart (no mark in /dev/kmsg), so the ' \
+            'reason and the kernel state are not checked' % what, meas
+    p, _, _, _ = isp(env, command, ('jpeg',), trace=False)
+    meas['recovered'] = not p
+    if p:
+        return 'partial', '%s, a clean error; with the firmware restored the next run fails: %s' % (
+            what, '; '.join(p)), meas
+    return 'pass', '%s, a clean error; restored, the next run writes a JPEG again' % what, meas
