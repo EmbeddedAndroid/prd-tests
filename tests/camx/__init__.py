@@ -19,18 +19,43 @@ the tests report the missing piece (a fail, or a skip in a product with
 "missing: skip"). A driver, service or camera that does not come up is
 a fail. Preview and concurrent streams fail below 90% of the profile's
 frame rate, and every stream fails when the camera service restarted
-during it."""
+during it.
+
+Images without the camera service run a CamX test client driven by a
+command file instead. The profile gives the client and its commands:
+
+  camx:
+    client:
+      cmd: <client> -f {cmdfile}     ({cmdfile}: the command file written
+                                      from commands.<name>.file)
+      cwd: <directory the client writes its images to>
+      env: {VAR: value}              (optional)
+      timeout: <seconds>             (default 120)
+      errors_max: {<error summary counter>: <max>}   (optional)
+      commands:
+        <name>: {file: <command file text>, width: W, height: H,
+                 jpeg: <glob>, yuv: <glob>, raw: <glob>}
+
+A run is the client with one command file; its images are the files it
+created in cwd (removed afterwards unless PRD_CAMX_KEEP is set). The ICP
+firmware debug log of the run is read from the camera driver's
+tracefs event (camera/cam_icp_fw_dbg) after raising the debugfs log
+level of every ICP the profile lists under camx.icps."""
 import ctypes
 import fcntl
 import glob
 import hashlib
 import os
 import re
+import shlex
 import shutil
+import signal
 import struct
+import subprocess
 import tempfile
+import time
 
-from prd.core import Missing, have, sh, test
+from prd.core import Missing, have, read, sh, test
 
 REQ_MGR_MODEL = 'cam-req-mgr-devnode'
 # entity functions of the CamX kernel driver (MEDIA_ENT_F_OLD_BASE + n,
@@ -346,3 +371,231 @@ def t_concurrent(env, seconds=5):
         '; cameras %s below 90%% of their rate over the window; rc %d: %s' % (low, rc, tail(log))
         if low else ''), meas))
 
+
+# The CamX test client (camx.client) and what a run of it leaves behind.
+TRACING = ('/sys/kernel/tracing', '/sys/kernel/debug/tracing')
+FW_EVENT = 'camera/cam_icp_fw_dbg'
+CAM_DEBUGFS = '/sys/kernel/debug/camera'
+# tracefs instance of the firmware log: its own buffer and switches, so
+# the global trace buffer and its settings stay as they were
+INSTANCE = 'prd-camx'
+
+
+def client(env):
+    c = env.cfg('camx', 'client') or {}
+    if not c.get('cmd'):
+        raise Missing('the board profile names no CamX test client (camx.client.cmd)', hw='camx')
+    exe = c['cmd'].split()[0]
+    if not (os.path.isabs(exe) and os.access(exe, os.X_OK)) and not have(exe):
+        raise Missing('CamX test client %s not on the image' % exe, hw='camx')
+    return c
+
+
+def command(env, name):
+    cmds = env.cfg('camx', 'client', 'commands', default=None) or {}
+    if name not in cmds or not cmds[name].get('file'):
+        raise Missing('the board profile has no CamX client command %r (camx.client.commands)' % name,
+                      hw='camx')
+    return cmds[name]
+
+
+def klog():
+    """Kernel log of this boot."""
+    if have('journalctl'):
+        rc, out = sh('journalctl -k -b --no-pager -o cat 2>/dev/null')
+        if rc == 0 and out.strip():
+            return out
+    return sh('dmesg 2>/dev/null')[1]
+
+
+def mark(what):
+    """Write a unique line to the kernel log and return it, so the log
+    after it can be told apart (klog_after)."""
+    m = 'prd-camx: %s %d.%d' % (what, os.getpid(), int(time.time() * 1000))
+    return m if put('/dev/kmsg', m + '\n') else None
+
+
+def klog_after(m):
+    """Kernel log after mark m; None when m is not in it."""
+    log = klog()
+    i = log.rfind(m) if m else -1
+    return log[i + len(m):] if i >= 0 else None
+
+
+def put(path, val):
+    try:
+        with open(path, 'w') as f:
+            f.write(str(val))
+        return True
+    except OSError:
+        return False
+
+
+def get(path):
+    try:
+        with open(path, errors='replace') as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+class Trace:
+    """ICP firmware debug log of one client run: the camera driver's
+    tracefs event in an instance of its own, with each ICP's debugfs
+    log type and level raised for the run and restored after it."""
+
+    def __init__(self, env):
+        self.icps = env.cfg('camx', 'icps', default=None) or []
+        top = next((d for d in TRACING if os.path.isdir(os.path.join(d, 'instances'))), None)
+        self.dir = os.path.join(top, 'instances', INSTANCE) if top else None
+        self.saved, self.on = {}, []
+
+    def start(self):
+        """The ICPs whose log is traced (empty when none can be)."""
+        if not self.dir:
+            return []
+        try:
+            os.mkdir(self.dir)
+        except FileExistsError:
+            pass
+        except OSError:
+            return []
+        if not put(os.path.join(self.dir, 'buffer_size_kb'), 8192) or \
+                not put(os.path.join(self.dir, 'events', FW_EVENT, 'enable'), 1):
+            self.stop()
+            return []
+        for i in self.icps:
+            files = [os.path.join(CAM_DEBUGFS, i, n) for n in ('icp_debug_type', 'icp_debug_lvl')]
+            old = [get(f) for f in files]
+            if None in old:
+                continue
+            self.saved.update(zip(files, (o.strip() for o in old)))
+            if put(files[0], 1) and put(files[1], 63):
+                self.on.append(i)
+        if not self.on:
+            self.stop()
+        return self.on
+
+    def stop(self):
+        text = get(os.path.join(self.dir, 'trace')) or ''
+        for f, v in self.saved.items():
+            put(f, v)
+        put(os.path.join(self.dir, 'events', FW_EVENT, 'enable'), 0)
+        try:
+            os.rmdir(self.dir)
+        except OSError:
+            pass
+        return text
+
+
+class Run:
+    """One client run: exit status, whether it hung, log, the files it
+    wrote, the ICP firmware log (None when it could not be traced) with
+    the ICPs traced, and its duration."""
+
+    def __init__(self, rc, hung, log, files, fw, traced, seconds, limit):
+        self.rc, self.hung, self.log, self.files, self.fw, self.traced, self.seconds, self.limit = \
+            rc, hung, log, files, fw, traced, seconds, limit
+
+    def problems(self):
+        if self.hung:
+            return ['the client did not exit within %d s (rc %d after %.1f s)' % (
+                self.limit, self.rc, self.seconds)]
+        return ['the client exited with %d: %s' % (self.rc, tail(self.log))] if self.rc else []
+
+    def meas(self):
+        return {'rc': self.rc, 'seconds': self.seconds}
+
+    def cleanup(self):
+        if not os.environ.get('PRD_CAMX_KEEP'):
+            for f in self.files:
+                try:
+                    os.unlink(f)
+                except OSError:
+                    pass
+
+
+def run_client(env, name, trace=True):
+    """Run the client on command file commands.<name> from cwd, in a
+    session of its own: on timeout the whole group gets SIGTERM, then
+    SIGKILL. Its files are those in cwd modified since the start (one
+    second earlier, for file systems with coarse timestamps)."""
+    c, cmd = client(env), command(env, name)
+    cwd = c.get('cwd') or tempfile.gettempdir()
+    os.makedirs(cwd, exist_ok=True)
+    fd, path = tempfile.mkstemp(prefix='prd-camx-', suffix='.txt')
+    with os.fdopen(fd, 'w') as f:
+        f.write(cmd['file'].strip() + '\n')
+    tr = Trace(env) if trace else None
+    traced = tr.start() if tr else []
+    limit = int(c.get('timeout', 120))
+    penv = dict(os.environ, **{k: str(v) for k, v in (c.get('env') or {}).items()})
+    t0, hung = time.time(), False
+    p = subprocess.Popen(c['cmd'].format(cmdfile=shlex.quote(path)), shell=True, cwd=cwd, env=penv,
+                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+    try:
+        try:
+            out = p.communicate(timeout=limit)[0]
+        except subprocess.TimeoutExpired:
+            hung = True
+            out = b''
+            for sig in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.killpg(p.pid, sig)
+                    out = p.communicate(timeout=min(5, limit))[0]
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+                except ProcessLookupError:
+                    break
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGKILL)
+            p.wait()
+        fw = tr.stop() if traced else None
+        os.unlink(path)
+    secs = round(time.time() - t0, 1)
+    rc = p.returncode if p.returncode >= 0 else 128 - p.returncode
+    # a client run under timeout(1) reports a hang as 124 or 137
+    hung = hung or rc in (124, 137) or secs >= limit
+    files = sorted(os.path.join(cwd, f) for f in os.listdir(cwd)
+                   if os.path.isfile(os.path.join(cwd, f)) and os.path.getmtime(os.path.join(cwd, f)) >= t0 - 1)
+    return Run(rc, hung, (out or b'').decode('utf-8', 'replace'), files, fw, traced, secs, limit)
+
+
+def parse_fw(text):
+    """Counts and version string from an ICP firmware debug log."""
+    lines = text.splitlines()
+    m = re.search(r'QC_IMAGE_VERSION_STRING=(\S+)', text)
+    return {'version': m.group(1) if m else None,
+            'frames': sum('CAMERAICP_SUCCESS' in l for l in lines),
+            'hw_failures': sum('ProcessHWFailure' in l for l in lines),
+            'cdm_loops': sum('Loop reach' in l for l in lines),
+            'frame_errors': sum('frame error' in l.lower() for l in lines)}
+
+
+def fw_problems(fw):
+    p = ['%d %s' % (fw[k], w) for k, w in (('hw_failures', 'ProcessHWFailure'),
+                                           ('cdm_loops', 'CDM "Loop reach" aborts'),
+                                           ('frame_errors', 'frame errors')) if fw[k]]
+    if not fw['frames']:
+        p.append('no CAMERAICP_SUCCESS (no frame completed in the firmware)')
+    return p
+
+
+def parse_summary(log):
+    """{counter: n} from the CamX error summary ("Num <counter> : <n>")."""
+    return {re.sub(r'\W+', '_', m.group(1).strip().lower()): int(m.group(2))
+            for m in re.finditer(r'^.*?\bNum (.+?)\s*:\s*(\d+)\s*$', log, re.M)}
+
+
+def summary_problems(env, log):
+    got = parse_summary(log)
+    p = []
+    for k, mx in sorted((env.cfg('camx', 'client', 'errors_max', default=None) or {}).items()):
+        s = re.sub(r'\W+', '_', k.strip().lower())
+        if s not in got:
+            p.append('no "%s" in the client error summary' % k)
+        elif got[s] > int(mx):
+            p.append('%s %d > %d' % (k, got[s], int(mx)))
+    return got, p

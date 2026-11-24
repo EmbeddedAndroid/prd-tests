@@ -17,6 +17,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 
 TOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, TOP)
@@ -352,6 +353,7 @@ def check_units():
         if dp.PACKED_YUV != {'YUYV': (0, 1, 2, 3), 'YVYU': (0, 3, 2, 1), 'UYVY': (1, 0, 3, 2),
                              'VYUY': (3, 0, 1, 2)}:
             bad.append('PACKED_YUV order %s' % dp.PACKED_YUV)
+    bad += check_camx_client()
     bad += check_board_targets()
     bad += check_rederive()
     bad += check_unparsed()
@@ -380,6 +382,129 @@ def check_units():
         print('FAIL unit', x)
     print('selftest: %d unit problems' % len(bad))
     return len(bad)
+
+
+# ICP firmware debug log of a run that completes its frames, and of the
+# first frame stall (the OFE never ends request 1, the CDM is aborted)
+FW_GOOD = ''.join('camx-hal3-test-1 [001] ..... 1%03d.000000: cam_icp_fw_dbg: %s\n' % (i, l) for i, l in enumerate(
+    ['QC_IMAGE_VERSION_STRING=CICP.FW.1.0-00001'] +
+    ['Responding to request %d errorType (CAMERAICP_SUCCESS)' % n for n in range(40)]))
+FW_STALL = ''.join('camx-hal3-test-1 [001] ..... 1%03d.000000: cam_icp_fw_dbg: %s\n' % (i, l) for i, l in enumerate(
+    ['QC_IMAGE_VERSION_STRING=CICP.FW.1.0-00001',
+     'Responding to request 0 errorType (CAMERAICP_SUCCESS)',
+     'ProcessHWFailure ofeScratch 0x0',
+     'CDMDV:In CDMAbort: !!!Loop reach']))
+SUMMARY = ('''CamX: PrintErrorSummary: ===== Error Summary =====
+CamX: PrintErrorSummary: Num Unknown Frame Error : 0
+CamX: PrintErrorSummary: Num Unexpected Buffer Error Notification : 1
+''')
+
+
+def fake_client(td, body):
+    """A client script for camx.client.cmd: body runs in cwd with the
+    command file as $1."""
+    p = os.path.join(td, 'client.sh')
+    with open(p, 'w') as f:
+        f.write(body)
+    return 'sh %s {cmdfile}' % p
+
+
+def check_camx_trace(cx, td):
+    """The real Trace on a fake tracefs and debugfs: it traces in an
+    instance of its own and puts every ICP's log type and level back."""
+    bad = []
+    top, dbg = os.path.join(td, 'tracing'), os.path.join(td, 'debug')
+    inst = os.path.join(top, 'instances', cx.INSTANCE)
+    os.makedirs(os.path.join(inst, 'events', cx.FW_EVENT))
+    for f, v in ((os.path.join(top, 'tracing_on'), '1'), (os.path.join(top, 'buffer_size_kb'), '1408'),
+                 (os.path.join(inst, 'trace'), 'fw line\n')):
+        open(f, 'w').write(v)
+    for i, t, l in (('icpa', '0', '2'), ('icpb', '1', '0')):
+        os.makedirs(os.path.join(dbg, i))
+        open(os.path.join(dbg, i, 'icp_debug_type'), 'w').write(t + '\n')
+        open(os.path.join(dbg, i, 'icp_debug_lvl'), 'w').write(l + '\n')
+    old = cx.TRACING, cx.CAM_DEBUGFS
+    cx.TRACING, cx.CAM_DEBUGFS = (top,), dbg
+    try:
+        tr = cx.Trace(core.Env({'camx': {'icps': ['icpa', 'icpb', 'icpc']}}))
+        on = tr.start()
+        during = [open(os.path.join(dbg, i, n)).read() for i in ('icpa', 'icpb')
+                  for n in ('icp_debug_type', 'icp_debug_lvl')]
+        text = tr.stop()
+    finally:
+        cx.TRACING, cx.CAM_DEBUGFS = old
+    after = [open(os.path.join(dbg, i, n)).read() for i in ('icpa', 'icpb') for n in ('icp_debug_type', 'icp_debug_lvl')]
+    if on != ['icpa', 'icpb'] or during != ['1', '63', '1', '63'] or after != ['0', '2', '1', '0'] or \
+            text != 'fw line\n' or open(os.path.join(top, 'tracing_on')).read() != '1' or \
+            open(os.path.join(top, 'buffer_size_kb')).read() != '1408' or \
+            open(os.path.join(inst, 'events', cx.FW_EVENT, 'enable')).read() != '0':
+        bad.append('camx Trace: on %s during %s after %s text %r' % (on, during, after, text))
+    return bad
+
+
+def check_camx_client():
+    """The CamX test client runner and the parsers of its logs."""
+    cx = sys.modules.get('tests.camx')
+    if cx is None:
+        return []
+    bad = []
+    g, b = cx.parse_fw(FW_GOOD), cx.parse_fw(FW_STALL)
+    if g != {'version': 'CICP.FW.1.0-00001', 'frames': 40, 'hw_failures': 0, 'cdm_loops': 0,
+             'frame_errors': 0} or cx.fw_problems(g):
+        bad.append('camx parse_fw good: %s %s' % (g, cx.fw_problems(g)))
+    if b['hw_failures'] != 1 or b['cdm_loops'] != 1 or len(cx.fw_problems(b)) != 2:
+        bad.append('camx parse_fw stall: %s %s' % (b, cx.fw_problems(b)))
+    if cx.fw_problems(cx.parse_fw(''))[-1:] != ['no CAMERAICP_SUCCESS (no frame completed in the firmware)']:
+        bad.append('camx parse_fw: an empty log is not a failure')
+    if cx.parse_summary(SUMMARY) != {'unknown_frame_error': 0, 'unexpected_buffer_error_notification': 1}:
+        bad.append('camx parse_summary: %s' % cx.parse_summary(SUMMARY))
+    env = core.Env({'camx': {'client': {'errors_max': {'Unknown Frame Error': 0,
+                                                       'Unexpected Buffer Error Notification': 0}}}})
+    if cx.summary_problems(env, SUMMARY)[1] != ['Unexpected Buffer Error Notification 1 > 0'] or \
+            'no "Unknown Frame Error" in the client error summary' not in cx.summary_problems(env, '')[1]:
+        bad.append('camx summary_problems: %s' % (cx.summary_problems(env, SUMMARY)[1],))
+    td = tempfile.mkdtemp(prefix='prd-selftest-camxc-')
+    cwd = os.path.join(td, 'out')
+    os.makedirs(cwd)
+    # an old image is not the run's; one the run rewrites under the same name is
+    for n in ('old.jpg', 'same.jpg'):
+        open(os.path.join(cwd, n), 'w').write('x')
+        os.utime(os.path.join(cwd, n), (1, 1))
+    cmd = fake_client(td, 'cat "$1"; echo "V=$V"; : > a.jpg; : > same.jpg\n'
+                          '[ "$V" = hang ] && sleep 30\n'
+                          '[ "$V" = deaf ] && trap "" TERM && sleep 30\n'
+                          '[ "$V" = killed ] && exit 137\nexit 0\n')
+    prof = {'camx': {'client': {'cmd': cmd, 'cwd': cwd, 'env': {'V': 'one two'}, 'timeout': 1,
+                                'commands': {'c': {'file': 'A:id=0\nQ'}}}}}
+    r = cx.run_client(core.Env(prof), 'c', trace=False)
+    if r.rc or [os.path.basename(f) for f in r.files] != ['a.jpg', 'same.jpg'] or 'A:id=0\nQ' not in r.log or \
+            'V=one two' not in r.log or r.problems() or r.fw is not None or r.meas()['rc'] != 0:
+        bad.append('camx run_client: rc %s files %s log %r' % (r.rc, r.files, r.log[:80]))
+    r.cleanup()
+    if os.listdir(cwd) != ['old.jpg']:
+        bad.append('camx run cleanup: %s left' % os.listdir(cwd))
+    # a hang is a hang whether the client takes SIGTERM, ignores it and
+    # takes SIGKILL, or runs under timeout(1) and reports 137
+    for v, rc in (('hang', 143), ('deaf', None), ('killed', 137)):
+        prof['camx']['client']['env'] = {'V': v}
+        t0 = time.time()
+        r = cx.run_client(core.Env(prof), 'c', trace=False)
+        p = r.problems()
+        if rc is not None and r.rc != rc or not r.hung or not p or \
+                not p[0].startswith('the client did not exit within 1 s') or time.time() - t0 > 5:
+            bad.append('camx run_client %s: rc %s hung %s %s in %.1f s' % (v, r.rc, r.hung, p, time.time() - t0))
+        r.cleanup()
+    bad += check_camx_trace(cx, td)
+    for b, want in (({'camx': {}}, 'camx.client.cmd'), ({'camx': {'client': {'cmd': 'no-such-client -f x'}}},
+                                                        'no-such-client not on the image'),
+                    ({'camx': {'client': {'cmd': 'sh'}}}, "command 'c'")):
+        try:
+            cx.run_client(core.Env(b), 'c')
+            bad.append('camx run_client %s: no Missing' % b)
+        except core.Missing as e:
+            if want not in str(e) or e.hw != 'camx':
+                bad.append('camx run_client %s: %s' % (b, e))
+    return bad
 
 
 def run_one(req, board, missing, rid='R-1'):

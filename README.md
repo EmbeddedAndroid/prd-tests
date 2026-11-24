@@ -226,6 +226,12 @@ dictionaries key by key.
 - `camx`: the camera service unit (`service`, default
   `qti-cam-server`) and the `cameras` the CamX stack exposes (`id`,
   `width`, `height`, `fps`, `format`), used by the `camx` module.
+  Images without the camera service use a CamX test client instead:
+  `client` gives its command line (`cmd`, with `{cmdfile}`), working
+  directory (`cwd`, where it writes images), `env`, `timeout`, the
+  error summary counters it may report (`errors_max`) and its
+  `commands` (command file text and image globs); `icps` lists the
+  ICPs whose firmware log the tests read.
 - `modules`: optional vendor modules (`audioreach`, `camx`).
 - `targets`: numbers this board must reach, by row ID, in the target
   syntax below; they replace the row's own target.
