@@ -9,7 +9,9 @@
 # not stalled), cplay must exit 0, and the microphones must record the
 # sine's frequency a margin above silence. A control run with the output
 # muted must not be detected, and a stream of random bytes must be refused
-# or end cleanly without a hang or a kernel error. Skipped with the reason
+# or end cleanly without a hang or a kernel error. After the stream has
+# drained and the output stayed idle long enough for the codecs to runtime
+# suspend, the same stream must be heard again. Skipped with the reason
 # without a compressed device, cplay or lame.
 
 # shellcheck disable=SC1091
@@ -34,16 +36,17 @@ BITRATE="128"
 MIN_DB="15"
 TOLERANCE_HZ="25"
 WAIT_SECONDS="60"
+IDLE_SECONDS="5"
 
 usage() {
     echo "Usage: $0 [-c <card>] [-D <compressed device>] [-q <capture PCM>]" 1>&2
     echo "          [-m '<ctl>=<v>;...'] [-n '<ctl>=<v>;...'] [-u '<ctl>=<v>;...']" 1>&2
     echo "          [-C <capture ch>] [-f <Hz>] [-l <dBFS>] [-s <seconds>] [-b <kbit/s>]" 1>&2
-    echo "          [-d <min dB>] [-t <tolerance Hz>] [-W <wait s>]" 1>&2
+    echo "          [-d <min dB>] [-t <tolerance Hz>] [-W <wait s>] [-I <idle s>]" 1>&2
     exit 1
 }
 
-while getopts "c:D:q:m:n:u:C:f:l:s:b:d:t:W:h" o; do
+while getopts "c:D:q:m:n:u:C:f:l:s:b:d:t:W:I:h" o; do
     case "$o" in
         c) CARD="${OPTARG}" ;;
         D) COMPR_DEVICE="${OPTARG}" ;;
@@ -59,11 +62,12 @@ while getopts "c:D:q:m:n:u:C:f:l:s:b:d:t:W:h" o; do
         d) MIN_DB="${OPTARG}" ;;
         t) TOLERANCE_HZ="${OPTARG}" ;;
         W) WAIT_SECONDS="${OPTARG}" ;;
+        I) IDLE_SECONDS="${OPTARG}" ;;
         h|*) usage ;;
     esac
 done
 
-CASES="compress-mp3-encode compress-mp3-playback compress-mp3-realtime compress-mp3-${FREQ}hz compress-muted-not-detected compress-garbage-clean"
+CASES="compress-mp3-encode compress-mp3-playback compress-mp3-realtime compress-mp3-${FREQ}hz compress-replay-after-idle compress-muted-not-detected compress-garbage-clean"
 
 skip_all() {
     local t
@@ -164,6 +168,24 @@ info_msg "decoded output: ${line} (silence ${base} dBFS)"
 rt=fail
 [ "${PLAY_RC}" -eq 0 ] && audio_detect "${line}" "${FREQ}" "${base}" "${MIN_DB}" "${TOLERANCE_HZ}" && rt=pass
 add_metric "compress-mp3-${FREQ}hz" "${rt}" "${m}" "dB"
+
+# A drained stream, then an idle output: the codecs runtime suspend in
+# between, and the next stream must still be heard.
+if [ "${rt}" != pass ]; then
+    info_msg "compress-replay-after-idle: the positive case did not pass"
+    report_skip "compress-replay-after-idle"
+else
+    sleep "${IDLE_SECONDS}"
+    play_and_record "${OUTPUT}/tone.mp3" replay
+    line="$(best "${OUTPUT}/replay.txt")"
+    m="$(awk -v l="$(audio_field "${line}" level)" -v b="${base}" 'BEGIN { printf "%.1f", l - b }')"
+    if [ "${CPLAY_RC}" -eq 0 ] && audio_detect "${line}" "${FREQ}" "${base}" "${MIN_DB}" "${TOLERANCE_HZ}"; then
+        add_metric "compress-replay-after-idle" pass "${m}" "dB"
+    else
+        info_msg "replay after ${IDLE_SECONDS} s idle: cplay exit ${CPLAY_RC}, ${line}"
+        add_metric "compress-replay-after-idle" fail "${m}" "dB"
+    fi
+fi
 
 if [ -n "${MUTE_MIXER}" ] && [ "${rt}" != pass ]; then
     info_msg "compress-muted-not-detected: the positive case did not pass, the control proves nothing"
