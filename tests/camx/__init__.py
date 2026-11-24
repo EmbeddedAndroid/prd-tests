@@ -32,6 +32,10 @@ command file instead. The profile gives the client and its commands:
       env: {VAR: value}              (optional)
       timeout: <seconds>             (default 120)
       errors_max: {<error summary counter>: <max>}   (optional)
+      probe: <command run once to make CamX probe the sensors when nothing
+              opened the stack yet, also read for the orientation report>
+              (default snapshot)
+      orientation: <pattern of a reported roll, or of (camera id, roll)>
       commands:
         <name>: {file: <command file text>, width: W, height: H,
                  jpeg: <glob>, yuv: <glob>, raw: <glob>}
@@ -43,6 +47,7 @@ tracefs event (camera/cam_icp_fw_dbg) after raising the debugfs log
 level of every ICP the profile lists under camx.icps."""
 import ctypes
 import fcntl
+import fnmatch
 import glob
 import hashlib
 import os
@@ -55,7 +60,7 @@ import subprocess
 import tempfile
 import time
 
-from prd.core import Missing, have, read, sh, test
+from prd.core import Missing, Skip, have, read, sh, test
 
 REQ_MGR_MODEL = 'cam-req-mgr-devnode'
 # entity functions of the CamX kernel driver (MEDIA_ENT_F_OLD_BASE + n,
@@ -599,3 +604,209 @@ def summary_problems(env, log):
         elif got[s] > int(mx):
             p.append('%s %d > %d' % (k, got[s], int(mx)))
     return got, p
+
+
+# Sensors (camx.sensors: connector, name and slot as the kernel driver
+# logs its probe, mounting roll, raw command and its frame geometry).
+PROBE = re.compile(r'Probe (success|failed) for (\S+?)\s+slot:\s*(\d+)')
+
+
+def sensor_cfg(env, i):
+    ss = env.cfg('camx', 'sensors', default=None) or []
+    if not 0 <= int(i) < len(ss):
+        raise Missing('the board profile lists %d CamX sensors (camx.sensors), not sensor %s' % (len(ss), i),
+                      hw='camx')
+    return ss[int(i)]
+
+
+def probes(log):
+    """[(ok, name, slot)] of the kernel driver's sensor probe lines."""
+    return [(m.group(1) == 'success', m.group(2).rstrip(','), int(m.group(3)))
+            for m in PROBE.finditer(log)]
+
+
+def probed(env):
+    """Probe lines of this boot; CamX probes when a client opens the
+    stack, so a boot without any runs the client's probe command once."""
+    p = probes(klog())
+    if not p:
+        run_client(env, env.cfg('camx', 'client', 'probe', default='snapshot'), trace=False).cleanup()
+        p = probes(klog())
+    return p
+
+
+@test('camx.sensor')
+def t_sensor(env, sensor=0):
+    """CamX sensor probe: the profile's sensor probes on its slot (other candidates on the slot may fail)"""
+    need(env, 'CamX sensor probe')
+    s = sensor_cfg(env, sensor)
+    p = probed(env)
+    slot = [(ok, n) for ok, n, sl in p if sl == int(s['slot'])]
+    meas = {'slot': int(s['slot']), 'candidates_failed': sum(1 for ok, _ in slot if not ok)}
+    if any(ok and n.lower() == s['name'].lower() for ok, n in slot):
+        return 'pass', '%s %s probed on slot %d (%d other candidates failed there)' % (
+            s.get('connector', ''), s['name'], int(s['slot']), meas['candidates_failed']), meas
+    why = '%s %s did not probe on slot %d: %s' % (
+        s.get('connector', ''), s['name'], int(s['slot']),
+        ', '.join('%s %s' % ('success' if ok else 'failed', n) for ok, n in slot) or
+        'no probe on that slot (%d probe lines this boot)' % len(p))
+    absent = env.cfg('absent', 'camera-sensor-%s' % s.get('connector', s['slot']))
+    if absent:
+        raise Skip('%s; board: %s' % (why, absent))
+    return 'fail', why, meas
+
+
+def raw10_stats(path, w, h, stride, rows=64, groups=128):
+    """Sampled pixel statistics of a MIPI RAW10 frame (4 pixels in 5 bytes)."""
+    vals, bottom = [], []
+    with open(path, 'rb') as f:
+        for y in sorted(set(list(range(0, h, max(1, h // rows))) + [h - 1])):
+            f.seek(y * stride)
+            row = f.read(w * 5 // 4)
+            out = bottom if y >= h - max(1, h // 8) else vals
+            for g in range(0, len(row) // 5, max(1, (w // 4) // groups)):
+                b = row[g * 5:g * 5 + 5]
+                out.extend((b[i] << 2) | ((b[4] >> (2 * i)) & 3) for i in range(4))
+    allv = vals + bottom
+    if not allv:
+        return {'mean': 0.0, 'std': 0.0, 'nonzero': 0.0, 'saturated': 0.0, 'levels': 0, 'bottom_nonzero': 0.0}
+    m = sum(allv) / float(len(allv))
+    return {'mean': round(m, 2), 'std': round((sum((x - m) ** 2 for x in allv) / len(allv)) ** 0.5, 2),
+            'nonzero': round(sum(1 for x in allv if x) / float(len(allv)), 3),
+            'saturated': round(sum(1 for x in allv if x >= 1023) / float(len(allv)), 3),
+            'levels': len(set(allv)),
+            'bottom_nonzero': round(sum(1 for x in bottom if x) / float(len(bottom)), 3) if bottom else 0.0}
+
+
+def raw_problems(st):
+    """A real scene: mostly non-zero (a frame the DMA never wrote is
+    zero), not saturated, not flat, written to the last rows."""
+    p = []
+    if st['nonzero'] < 0.5:
+        p.append('%.0f%% zero pixels' % (100 * (1 - st['nonzero'])))
+    if st['bottom_nonzero'] < 0.5:
+        p.append('the last rows are %.0f%% zero (frame not fully written)' % (100 * (1 - st['bottom_nonzero'])))
+    if st['saturated'] > 0.25:
+        p.append('%.0f%% saturated pixels' % (100 * st['saturated']))
+    if st['std'] < 1.0 or st['levels'] < 16:
+        p.append('flat image (std %.2f, %d levels)' % (st['std'], st['levels']))
+    return p
+
+
+def name_size(path):
+    m = re.search(r'_w\[(\d+)\]_h\[(\d+)\]', os.path.basename(path))
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+@test('camx.raw')
+def t_raw(env, sensor=0):
+    """CamX raw capture: RAW10 frames of a real scene from one sensor (size, not zero, not saturated, not flat)"""
+    need(env, 'CamX raw capture')
+    s = sensor_cfg(env, sensor)
+    w, h, stride = int(s['width']), int(s['height']), int(s.get('stride', int(s['width']) * 5 // 4))
+    name = s.get('raw')
+    if not name:
+        raise Missing('the board profile gives no raw command for sensor %s (camx.sensors[].raw)' % sensor,
+                      hw='camx')
+    run = run_client(env, name, trace=False)
+    try:
+        pat = command(env, name).get('raw', '*.raw')
+        files = [f for f in run.files if fnmatch.fnmatch(os.path.basename(f), pat)]
+        prob = run.problems()
+        meas = dict(run.meas(), frames=len(files), width=w, height=h, stride=stride)
+        if not files:
+            prob.append('no raw frame (%s) written' % pat)
+        digests = set()
+        for i, f in enumerate(files):
+            size = os.path.getsize(f)
+            meas['bytes'] = size
+            if name_size(f) and name_size(f) != (w, h):
+                prob.append('%s is %dx%d, not %dx%d' % (os.path.basename(f), name_size(f)[0],
+                                                       name_size(f)[1], w, h))
+            if size < stride * h:
+                prob.append('frame %d has %d bytes, below %d x %d RAW10 at stride %d' % (i, size, w, h, stride))
+                continue
+            st = raw10_stats(f, w, h, stride)
+            meas.update(('raw_' + k, v) for k, v in st.items())
+            prob += ['frame %d: %s' % (i, x) for x in raw_problems(st)]
+            digests.add(hashlib.sha256(open(f, 'rb').read()).hexdigest())
+        if len(files) > 1 and len(digests) < 2:
+            prob.append('all %d frames are identical (no new exposure)' % len(files))
+        st = 'fail' if prob else 'pass'
+        return st, '%s %s %dx%d RAW10: %d frames%s%s' % (
+            s.get('connector', ''), s['name'], w, h, len(files),
+            ', mean %s std %s of 1023' % (meas.get('raw_mean'), meas.get('raw_std')) if 'raw_mean' in meas else '',
+            '; ' + '; '.join(prob) if prob else ''), meas
+    finally:
+        run.cleanup()
+
+
+def dt_rolls():
+    """{cell-index: sensor-position-roll} of the camera sensor DT nodes."""
+    out = {}
+    for d, _, files in os.walk('/proc/device-tree'):
+        if 'sensor-position-roll' in files and 'cell-index' in files and \
+                'cam-sensor' in read(os.path.join(d, 'compatible')):
+            with open(os.path.join(d, 'cell-index'), 'rb') as f:
+                idx = struct.unpack('>I', f.read(4))[0]
+            with open(os.path.join(d, 'sensor-position-roll'), 'rb') as f:
+                out[idx] = struct.unpack('>I', f.read(4))[0]
+    return out
+
+
+@test('camx.orientation')
+def t_orientation(env):
+    """CamX sensor orientation: each sensor's DT mounting roll and the orientation CamX reports match the profile"""
+    need(env, 'CamX sensor orientation')
+    client(env)
+    ss = env.cfg('camx', 'sensors', default=None) or []
+    if not ss:
+        raise Missing('the board profile lists no CamX sensors (camx.sensors)', hw='camx')
+    dt = dt_rolls()
+    want = sorted(int(s.get('roll', 0)) for s in ss)
+    meas, prob = {}, []
+    for s in ss:
+        got = dt.get(int(s['slot']))
+        meas['roll_%s' % s.get('connector', s['slot'])] = got
+        if got is None:
+            prob.append('no camera sensor DT node with cell-index %d and sensor-position-roll' % int(s['slot']))
+        elif got != int(s.get('roll', 0)):
+            prob.append('%s DT roll %d, profile %d' % (s['name'], got, int(s.get('roll', 0))))
+    pat = env.cfg('camx', 'client', 'orientation', default=None)
+    if prob or not pat:
+        return ('fail' if prob else 'partial', 'DT rolls %s%s' % (
+            dt, '; ' + '; '.join(prob) if prob else
+            '; the orientation CamX reports is not read (no camx.client.orientation pattern)'), meas)
+    probe = env.cfg('camx', 'client', 'probe', default='snapshot')
+    run = run_client(env, probe, trace=False)
+    run.cleanup()
+    meas.update(run.meas())
+    rep = re.findall(pat, run.log)
+    if not rep:
+        return 'partial', 'DT rolls %s; the client log of command %s carries no orientation ' \
+            '(camx.client.orientation), so the orientation CamX reports is not read' % (dt, probe), meas
+    if isinstance(rep[0], tuple):
+        # (camera id, roll): compared per sensor (camx.sensors[].camera)
+        got = dict((int(c), int(r)) for c, r in rep)
+        meas.update(('reported_%s' % s.get('connector', s['slot']), got.get(int(s['camera'])))
+                    for s in ss if 'camera' in s)
+        bad = ['%s camera %s reports %s, mounted %d' % (s['name'], s['camera'], got[int(s['camera'])],
+                                                       int(s.get('roll', 0)))
+               for s in ss if 'camera' in s and int(s['camera']) in got
+               and got[int(s['camera'])] != int(s.get('roll', 0))]
+        lack = [s['name'] for s in ss if 'camera' not in s or int(s['camera']) not in got]
+    else:
+        # rolls without camera ids, in no known order: fewer than one per
+        # sensor can only be checked for values the profile does not mount
+        got = [int(r) for r in rep]
+        meas['reported'] = got
+        short = len(got) < len(ss)
+        bad = [] if (set(got) <= set(want) if short else set(got) == set(want)) else \
+            ['CamX reports orientations %s, the profile mounts %s' % (got, want)]
+        lack = ['%d orientations reported for %d sensors' % (len(got), len(ss))] if short else []
+    if bad:
+        return 'fail', 'DT rolls %s; %s' % (dt, '; '.join(bad)), meas
+    if lack:
+        return 'partial', 'DT rolls %s; CamX orientation not read for every sensor: %s' % (
+            dt, ', '.join(lack)), meas
+    return 'pass', 'DT rolls %s; CamX reports orientations %s' % (dt, rep), meas

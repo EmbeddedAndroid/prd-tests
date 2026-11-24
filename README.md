@@ -230,8 +230,13 @@ dictionaries key by key.
   `client` gives its command line (`cmd`, with `{cmdfile}`), working
   directory (`cwd`, where it writes images), `env`, `timeout`, the
   error summary counters it may report (`errors_max`) and its
-  `commands` (command file text and image globs); `icps` lists the
-  ICPs whose firmware log the tests read.
+  `commands` (command file text and image globs) and the patterns of
+  its `orientation` report; `icps` lists the ICPs whose firmware log
+  the tests read; `sensors` the sensors (`connector`, `name` and
+  `slot` as the kernel driver logs the probe, mounting `roll`, the
+  `raw` command and its `width`, `height` and RAW10 `stride`). A
+  sensor not fitted is listed under `absent` as
+  `camera-sensor-<connector>`.
 - `modules`: optional vendor modules (`audioreach`, `camx`).
 - `targets`: numbers this board must reach, by row ID, in the target
   syntax below; they replace the row's own target.

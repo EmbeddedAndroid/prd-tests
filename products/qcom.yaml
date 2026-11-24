@@ -319,6 +319,25 @@ requirements:
   QCA-005:
     title: "CamX concurrent cameras"
     test: camx.concurrent
+  QCA-006:
+    title: "CamX sensor probe: first profile sensor"
+    test: camx.sensor
+    args: {sensor: 0}
+  QCA-007:
+    title: "CamX sensor probe: second profile sensor"
+    test: camx.sensor
+    args: {sensor: 1}
+  QCA-008:
+    title: "CamX raw capture: first profile sensor"
+    test: camx.raw
+    args: {sensor: 0}
+  QCA-009:
+    title: "CamX raw capture: second profile sensor"
+    test: camx.raw
+    args: {sensor: 1}
+  QCA-010:
+    title: "CamX sensor mounting orientation"
+    test: camx.orientation
   QPL-001:
     title: "Remote processors running"
     test: platform.remoteproc

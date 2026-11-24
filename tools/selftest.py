@@ -10,7 +10,9 @@ entry must name a test and match a product requirement. Regression cases
 cover run_last ordering, shell case status, the latency onset channel,
 codec roles, decoder output caps, the per-test time limit, board
 targets and the re-derivation tools/coverage.py applies, including
-reasons a console line break cut. Exit status 1 on any mismatch."""
+reasons a console line break cut. The CamX client rows run on a fake
+client with generic log fixtures: each passes the good run and fails
+the broken one it is written to catch. Exit status 1 on any mismatch."""
 import glob
 import inspect
 import json
@@ -504,6 +506,99 @@ def check_camx_client():
         except core.Missing as e:
             if want not in str(e) or e.hw != 'camx':
                 bad.append('camx run_client %s: %s' % (b, e))
+    bad += check_camx_sensors(cx, td)
+    return bad
+
+
+PROBES = ('''CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1001: Probe failed for sensorb slot:2, slave_addr:0x20, sensor_id:0x9
+CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1001: Probe success for sensora slot:2, slave_addr:0x34, sensor_id:0x5
+CAM_INFO: CAM-SENSOR: cam_sensor_driver_cmd: 1001: Probe failed for sensorc slot:3, slave_addr:0x10, sensor_id:0x7
+''')
+
+
+def raw10(path, w, h, stride, px):
+    """Write a RAW10 frame whose pixel (x, y) is px(x, y)."""
+    with open(path, 'wb') as f:
+        for y in range(h):
+            row = bytearray()
+            for x in range(0, w, 4):
+                p = [px(x + i, y) & 1023 for i in range(4)]
+                row += bytes([v >> 2 for v in p] + [sum((v & 3) << (2 * i) for i, v in enumerate(p))])
+            f.write(bytes(row) + bytes(stride - len(row)))
+
+
+def check_camx_sensors(cx, td):
+    """Sensor probe, absent slot, RAW10 decoding and the raw scene checks."""
+    bad = []
+    if cx.probes(PROBES) != [(False, 'sensorb', 2), (True, 'sensora', 2), (False, 'sensorc', 3)]:
+        bad.append('camx probes: %s' % cx.probes(PROBES))
+    klog0 = cx.klog
+    cx.klog = lambda since=None: PROBES
+    ss = [{'connector': 'J1', 'name': 'sensora', 'slot': 2}, {'connector': 'J2', 'name': 'sensorc', 'slot': 3}]
+    try:
+        # a failed candidate on a slot another candidate probed is normal;
+        # a slot where nothing probed fails, or skips where the board says
+        # the sensor is not fitted
+        for i, absent, want in ((0, {}, 'pass'), (1, {}, 'fail'), (1, {'camera-sensor-J2': 'not fitted'}, 'skip')):
+            b = {'modules': {'camx': True}, 'camx': {'sensors': ss}, 'absent': absent}
+            got, why, _ = core.Runner(core.Env(b), td).call('camx.sensor', {'sensor': i})
+            if got != want or (want == 'skip' and 'not fitted' not in why):
+                bad.append('camx.sensor %d absent %s: got %s %s, want %s' % (i, absent, got, why, want))
+    finally:
+        cx.klog = klog0
+    w, h, stride = 64, 48, 96
+    scene, zero, sat, short = (os.path.join(td, n) for n in ('scene', 'zero', 'sat', 'short'))
+    raw10(scene, w, h, stride, lambda x, y: 64 + (x * 7 + y * 13) % 600)
+    raw10(zero, w, h, stride, lambda x, y: 0)
+    raw10(sat, w, h, stride, lambda x, y: 1023)
+    raw10(short, w, h, stride, lambda x, y: 0 if y >= h - 6 else 64 + (x * 7 + y * 13) % 600)
+    st = cx.raw10_stats(scene, w, h, stride)
+    if cx.raw_problems(st) or st['levels'] < 16 or not 300 < st['mean'] < 400:
+        bad.append('camx raw10 scene: %s %s' % (st, cx.raw_problems(st)))
+    for f, word in ((zero, 'zero pixels'), (sat, 'saturated'), (short, 'not fully written')):
+        p = cx.raw_problems(cx.raw10_stats(f, w, h, stride))
+        if not any(word in x for x in p):
+            bad.append('camx raw10 %s: %s' % (os.path.basename(f), p))
+    if cx.name_size('/x/preview_w[4056]_h[3040]_id[0]_stride[6400]_slice[3040]_x.raw') != (4056, 3040):
+        bad.append('camx name_size')
+    # camx.raw on a client that writes two frames of the given file; the
+    # orientation from the DT and from the client log
+    cwd = os.path.join(td, 'raw-out')
+    os.makedirs(cwd, exist_ok=True)
+    cmd = fake_client(td, 'for i in 1 2; do cp "$SRC" "preview_w[64]_h[48]_id[0]_f$i.raw"; done\n'
+                      '[ "$SRC" = "%s" ] && printf "\\001" >> "preview_w[64]_h[48]_id[0]_f2.raw"\n'
+                      'echo "camera 0 orientation: 0"; [ -n "$ROLL" ] && echo "camera 1 orientation: $ROLL"\n'
+                      '[ "$MODE" = hang ] && sleep 30\nexit 0\n' % scene)
+    one, pair = r'orientation: (\d+)', r'camera (\d+) orientation: (\d+)'
+    dt0 = cx.dt_rolls
+    for src, roll, mode, pat, dt, test, want, word in (
+            (scene, 180, '', one, {2: 0, 3: 180}, 'camx.raw', 'pass', '2 frames'),
+            (zero, 180, '', one, {2: 0, 3: 180}, 'camx.raw', 'fail', 'zero pixels'),
+            # frames written, then the client never exits: a fail, with the reason
+            (scene, 180, 'hang', one, {2: 0, 3: 180}, 'camx.raw', 'fail', 'did not exit within 1 s'),
+            (scene, 180, '', one, {2: 0, 3: 180}, 'camx.orientation', 'pass', '180'),
+            (scene, 0, '', one, {2: 0, 3: 180}, 'camx.orientation', 'fail', 'profile mounts [0, 180]'),
+            (scene, '', '', one, {2: 0, 3: 180}, 'camx.orientation', 'partial', '1 orientations reported for 2'),
+            (scene, 90, '', one, {2: 0, 3: 180}, 'camx.orientation', 'fail', 'reports orientations [0, 90]'),
+            (scene, 180, '', pair, {2: 0, 3: 180}, 'camx.orientation', 'pass', '180'),
+            (scene, 0, '', pair, {2: 0, 3: 180}, 'camx.orientation', 'fail', 'camera 1 reports 0, mounted 180'),
+            (scene, '', '', pair, {2: 0, 3: 180}, 'camx.orientation', 'partial', 'sensorc'),
+            (scene, 180, '', one, {2: 0, 3: 0}, 'camx.orientation', 'fail', 'DT roll 0, profile 180')):
+        b = {'modules': {'camx': True},
+             'camx': {'client': {'cmd': cmd, 'cwd': cwd, 'env': {'SRC': src, 'ROLL': roll, 'MODE': mode},
+                                 'orientation': pat, 'timeout': 1,
+                                 'commands': {'raw': {'file': 'P:2', 'raw': 'preview_*'},
+                                              'snapshot': {'file': 'Q'}}},
+                      'sensors': [dict(ss[0], width=w, height=h, stride=stride, raw='raw', camera=0),
+                                  dict(ss[1], roll=180, camera=1)]}}
+        cx.dt_rolls = lambda: dt
+        try:
+            got, why, meas = core.Runner(core.Env(b), td).call(test, {} if 'orient' in test else {'sensor': 0})
+        finally:
+            cx.dt_rolls = dt0
+        if got != want or word not in why or ('rc' not in meas and 'DT roll' not in word) or os.listdir(cwd):
+            bad.append('%s %s roll %s %s: got %s %s, want %s (%s)' % (test, os.path.basename(src), roll, mode, got,
+                                                                      why[:120], want, word))
     return bad
 
 
