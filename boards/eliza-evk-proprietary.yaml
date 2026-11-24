@@ -23,3 +23,63 @@ audio:
         PERIOD_FRAMES: 256
         TONE_DBFS: -6
         FREQ: 1600
+
+# CamX: camera_eliza (camera-driver) and the CamX core with its CHI test
+# client; no camera service or qtiqmmfsrc on this image yet, so the
+# qtiqmmfsrc rows report them missing and the client rows run.
+camx:
+  client:
+    cmd: camx-hal3-test -f {cmdfile}
+    cwd: /data/misc/camera
+    timeout: 120
+    orientation: 'orientation: (\d+)'
+    errors_max: {Unknown Frame Error: 0}
+    probe: snapshot
+    commands:
+      # snapshot and preview of the IMX577 through the ISP (ICP) pipeline
+      snapshot:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420,ssize=1920x1080,sformat=jpeg
+          W:6
+          s:1
+          W:4
+          P:1
+          W:4
+          D
+          Q
+        width: 1920
+        height: 1080
+        jpeg: snapshot_*.jpg
+        yuv: preview_*.yuv
+      raw-0:
+        file: |
+          A:id=0,psize=4056x3040,pformat=raw10,ssize=4056x3040,sformat=raw10
+          W:6
+          P:2
+          W:4
+          D
+          Q
+        raw: preview_*
+      raw-1:
+        file: |
+          A:id=1,psize=1280x800,pformat=raw10,ssize=1280x800,sformat=raw10
+          W:6
+          P:2
+          W:4
+          D
+          Q
+        raw: preview_*
+  icps: [icp, icp1]
+  firmware:
+    - /lib/firmware/qcom/eliza/CAMERA_ICP_970.mbn
+    - /lib/firmware/qcom/eliza/CAMERA_ICP_1_970.mbn
+  gdsc: cam_cc_titan_top_gdsc
+  # slots as the kernel driver logs the probe (DT cell-index), camera
+  # ids as the client numbers them; the OV9282 module is mounted upside
+  # down (DT sensor-position-roll 180)
+  sensors:
+    - {connector: CAM0, name: imx577, slot: 5, camera: 0, roll: 0, raw: raw-0, width: 4056, height: 3040, stride: 5120}
+    - {connector: CAM1, name: ov9282_master, slot: 1, camera: 1, roll: 180, raw: raw-1, width: 1280, height: 800, stride: 1600}
+
+modules:
+  camx: true
