@@ -17,6 +17,7 @@ import glob
 import inspect
 import json
 import os
+import struct
 import sys
 import tempfile
 import time
@@ -463,7 +464,9 @@ def check_camx_client():
     env = core.Env({'camx': {'client': {'errors_max': {'Unknown Frame Error': 0,
                                                        'Unexpected Buffer Error Notification': 0}}}})
     if cx.summary_problems(env, SUMMARY)[1] != ['Unexpected Buffer Error Notification 1 > 0'] or \
-            'no "Unknown Frame Error" in the client error summary' not in cx.summary_problems(env, '')[1]:
+            cx.summary_problems(env, '')[1] or \
+            'no "Unknown Frame Error" in the client error summary' not in \
+            cx.summary_problems(env, 'Num Unexpected Shutter : 0')[1]:
         bad.append('camx summary_problems: %s' % (cx.summary_problems(env, SUMMARY)[1],))
     td = tempfile.mkdtemp(prefix='prd-selftest-camxc-')
     cwd = os.path.join(td, 'out')
@@ -507,6 +510,7 @@ def check_camx_client():
             if want not in str(e) or e.hw != 'camx':
                 bad.append('camx run_client %s: %s' % (b, e))
     bad += check_camx_sensors(cx, td)
+    bad += check_camx_isp(cx, td)
     return bad
 
 
@@ -599,6 +603,115 @@ def check_camx_sensors(cx, td):
         if got != want or word not in why or ('rc' not in meas and 'DT roll' not in word) or os.listdir(cwd):
             bad.append('%s %s roll %s %s: got %s %s, want %s (%s)' % (test, os.path.basename(src), roll, mode, got,
                                                                       why[:120], want, word))
+    return bad
+
+
+def jpeg(w, h, scan, thumb=(32, 24)):
+    """A JPEG of w x h with an EXIF thumbnail of another size in APP1."""
+    def seg(m, body):
+        return bytes([0xff, m]) + struct.pack('>H', len(body) + 2) + body
+    sof = lambda sw, sh: seg(0xc0, struct.pack('>BHHB', 8, sh, sw, 3) + bytes(9))
+    exif = b'Exif\0\0' + b'\xff\xd8' + sof(*thumb) + b'\xff\xd9'
+    return b'\xff\xd8' + seg(0xe1, exif) + seg(0xdb, bytes(65)) + sof(w, h) + seg(0xda, bytes(10)) + \
+        scan + b'\xff\xd9'
+
+
+class FakeTrace:
+    """Trace stand-in: the firmware log of the next runs, from every
+    profile ICP but those in drop."""
+    log, drop = [], []
+
+    def __init__(self, env):
+        self.icps = env.cfg('camx', 'icps', default=None) or []
+
+    def start(self):
+        return [i for i in self.icps if i not in FakeTrace.drop]
+
+    def stop(self):
+        return FakeTrace.log.pop(0) if FakeTrace.log else ''
+
+
+def check_camx_isp(cx, td):
+    """JPEG and preview checks, and the ISP rows on a fake client and
+    firmware log: a good run passes, the first frame stall fails."""
+    import random
+    bad = []
+    rng = random.Random(1)
+    noise = bytes(rng.getrandbits(8) for _ in range(4096))
+    j = cx.jpeg_info(jpeg(64, 48, noise))
+    if (j['width'], j['height']) != (64, 48) or j['entropy'] < 7.5:
+        bad.append('camx jpeg_info (EXIF thumbnail first): %s' % j)
+    for d, word in ((jpeg(64, 48, noise)[:-2], 'EOI'), (b'\x89PNG' + noise, 'SOI')):
+        try:
+            cx.jpeg_info(d)
+            bad.append('camx jpeg_info accepted a file without %s' % word)
+        except ValueError as e:
+            if word not in str(e):
+                bad.append('camx jpeg_info %s: %s' % (word, e))
+    imgs = {}
+    for n, d in (('good.jpg', jpeg(64, 48, noise)), ('flat.jpg', jpeg(64, 48, bytes(200))),
+                 ('size.jpg', jpeg(32, 48, noise)),
+                 ('good.yuv', bytes(rng.getrandbits(8) for _ in range(64 * 48)) + bytes([128]) * (64 * 24)),
+                 ('flat.yuv', bytes([16]) * (64 * 72)),
+                 ('cut.yuv', bytes(rng.getrandbits(8) for _ in range(64 * 40)) + bytes(64 * 32)),
+                 ('short.yuv', bytes(100))):
+        imgs[n] = os.path.join(td, n)
+        open(imgs[n], 'wb').write(d)
+    for n, check, word in (('good.jpg', cx.jpeg_problems, None), ('flat.jpg', cx.jpeg_problems, 'flat'),
+                           ('size.jpg', cx.jpeg_problems, 'not 64x48'), ('good.yuv', cx.nv21_problems, None),
+                           ('flat.yuv', cx.nv21_problems, 'flat luma'),
+                           ('cut.yuv', cx.nv21_problems, 'not fully written'),
+                           ('short.yuv', cx.nv21_problems, 'bytes')):
+        p = check(imgs[n], 64, 48)[0]
+        if (word is None and p) or (word and not any(word in x for x in p)):
+            bad.append('camx %s: %s' % (n, p))
+    cwd = os.path.join(td, 'isp-out')
+    os.makedirs(cwd, exist_ok=True)
+    # MODE good writes both images, MODE stall writes none (the OFE never
+    # ends the first request, so no image leaves the pipeline)
+    cmd = fake_client(td, '[ "$MODE" != stall ] && cp %s snapshot_w[64]_h[48]_id[0]_x.jpg && '
+                          'cp %s "preview_w[64]_h[48]_id[0]_stride[64]_slice[48]_x.yuv"\n'
+                          '[ "$MODE" = nosum ] || printf "%%s" "%s"\nexit 0\n' % (
+                              imgs['good.jpg'], imgs['good.yuv'], SUMMARY))
+    tr0 = cx.Trace
+    cx.Trace = FakeTrace
+    try:
+        for t in ('camx.snapshot', 'camx.yuv', 'camx.isp_log'):
+            for mode, fw, want in (('good', FW_GOOD, 'pass'), ('stall', FW_STALL, 'fail'),
+                                   ('good', FW_STALL, 'fail'), ('good', None, 'partial')):
+                b = {'modules': {'camx': True}, 'camx': {'icps': ['icp'], 'client': {
+                    'cmd': cmd, 'cwd': cwd, 'env': {'MODE': mode}, 'errors_max': {'Unknown Frame Error': 0},
+                    'commands': {'snapshot': {'file': 'Q', 'width': 64, 'height': 48,
+                                              'jpeg': 'snapshot_*.jpg', 'yuv': 'preview_*.yuv'}}}}}
+                FakeTrace.log = [fw]
+                if fw is None:
+                    cx.Trace = tr0
+                got, why, meas = core.Runner(core.Env(b), td).call(t, {})
+                cx.Trace = FakeTrace
+                if got != want or os.listdir(cwd):
+                    bad.append('%s %s fw %s: got %s %s, want %s' % (t, mode, (fw or 'none')[-20:], got,
+                                                                    why[:160], want))
+        # no error summary: partial for the firmware log row only; a
+        # firmware log from fewer ICPs than the profile lists: partial
+        for t, mode, drop, want, word in (('camx.isp_log', 'nosum', [], 'partial', 'no error summary'),
+                                          ('camx.snapshot', 'nosum', [], 'pass', ''),
+                                          ('camx.snapshot', 'good', ['icpz'], 'partial', 'no firmware log from icpz')):
+            b['camx']['icps'], b['camx']['client']['env'] = ['icp', 'icpz'], {'MODE': mode}
+            FakeTrace.log, FakeTrace.drop = [FW_GOOD], drop
+            got, why, meas = core.Runner(core.Env(b), td).call(t, {})
+            if got != want or word not in why or meas.get('rc') != 0:
+                bad.append('%s %s drop %s: got %s %s, want %s' % (t, mode, drop, got, why[:160], want))
+        FakeTrace.drop = []
+        b['camx']['client']['commands']['snapshot']['fps'] = 30
+        got, why, _ = core.Runner(core.Env(b), td).call('camx.fps', {})
+        if got != 'partial' or 'camx.client.fps' not in why:
+            bad.append('camx.fps without client timing: %s %s' % (got, why))
+        b['camx']['client']['fps'] = r'fps: ([\d.]+)'
+        got, why, _ = core.Runner(core.Env(b), td).call('camx.fps', {})
+        if got != 'fail' or 'no frame rate' not in why:
+            bad.append('camx.fps without a rate in the log: %s %s' % (got, why))
+    finally:
+        cx.Trace = tr0
     return bad
 
 

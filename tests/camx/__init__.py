@@ -31,7 +31,9 @@ command file instead. The profile gives the client and its commands:
       cwd: <directory the client writes its images to>
       env: {VAR: value}              (optional)
       timeout: <seconds>             (default 120)
-      errors_max: {<error summary counter>: <max>}   (optional)
+      errors_max: {<error summary counter>: <max>}   (optional; checked when
+                  the client prints its error summary, which CamX skips on
+                  some closes)
       probe: <command run once to make CamX probe the sensors when nothing
               opened the stack yet, also read for the orientation report>
               (default snapshot)
@@ -45,11 +47,13 @@ created in cwd (removed afterwards unless PRD_CAMX_KEEP is set). The ICP
 firmware debug log of the run is read from the camera driver's
 tracefs event (camera/cam_icp_fw_dbg) after raising the debugfs log
 level of every ICP the profile lists under camx.icps."""
+import collections
 import ctypes
 import fcntl
 import fnmatch
 import glob
 import hashlib
+import math
 import os
 import re
 import shlex
@@ -396,7 +400,7 @@ def client(env):
     return c
 
 
-def command(env, name):
+def command_cfg(env, name):
     cmds = env.cfg('camx', 'client', 'commands', default=None) or {}
     if name not in cmds or not cmds[name].get('file'):
         raise Missing('the board profile has no CamX client command %r (camx.client.commands)' % name,
@@ -525,7 +529,7 @@ def run_client(env, name, trace=True):
     session of its own: on timeout the whole group gets SIGTERM, then
     SIGKILL. Its files are those in cwd modified since the start (one
     second earlier, for file systems with coarse timestamps)."""
-    c, cmd = client(env), command(env, name)
+    c, cmd = client(env), command_cfg(env, name)
     cwd = c.get('cwd') or tempfile.gettempdir()
     os.makedirs(cwd, exist_ok=True)
     fd, path = tempfile.mkstemp(prefix='prd-camx-', suffix='.txt')
@@ -600,7 +604,8 @@ def summary_problems(env, log):
     for k, mx in sorted((env.cfg('camx', 'client', 'errors_max', default=None) or {}).items()):
         s = re.sub(r'\W+', '_', k.strip().lower())
         if s not in got:
-            p.append('no "%s" in the client error summary' % k)
+            if got:
+                p.append('no "%s" in the client error summary' % k)
         elif got[s] > int(mx):
             p.append('%s %d > %d' % (k, got[s], int(mx)))
     return got, p
@@ -710,7 +715,7 @@ def t_raw(env, sensor=0):
                       hw='camx')
     run = run_client(env, name, trace=False)
     try:
-        pat = command(env, name).get('raw', '*.raw')
+        pat = command_cfg(env, name).get('raw', '*.raw')
         files = [f for f in run.files if fnmatch.fnmatch(os.path.basename(f), pat)]
         prob = run.problems()
         meas = dict(run.meas(), frames=len(files), width=w, height=h, stride=stride)
@@ -810,3 +815,185 @@ def t_orientation(env):
         return 'partial', 'DT rolls %s; CamX orientation not read for every sensor: %s' % (
             dt, ', '.join(lack)), meas
     return 'pass', 'DT rolls %s; CamX reports orientations %s' % (dt, rep), meas
+
+
+# ISP path: images the client writes through the ICP (offline) pipeline.
+def jpeg_info(d):
+    """Frame size, scan length and entropy (bits per byte) of a baseline
+    or progressive JPEG; ValueError when it is not one. SOF markers
+    inside APP segments (an EXIF thumbnail) are skipped with them."""
+    if d[:2] != b'\xff\xd8':
+        raise ValueError('no SOI marker')
+    end = len(d.rstrip(b'\0'))
+    if d[end - 2:end] != b'\xff\xd9':
+        raise ValueError('no EOI marker (truncated)')
+    i, size = 2, None
+    while i + 4 <= end:
+        if d[i] != 0xff:
+            raise ValueError('no marker at byte %d' % i)
+        m = d[i + 1]
+        if m == 0xff:
+            i += 1
+            continue
+        n = struct.unpack('>H', d[i + 2:i + 4])[0]
+        if 0xc0 <= m <= 0xcf and m not in (0xc4, 0xc8, 0xcc):
+            h, w = struct.unpack('>HH', d[i + 5:i + 9])
+            size = (w, h)
+        if m == 0xda:
+            if not size:
+                raise ValueError('no SOF marker before the scan')
+            scan = d[i + 2 + n:end - 2]
+            c = collections.Counter(scan)
+            ent = -sum(v / float(len(scan)) * math.log(v / float(len(scan)), 2) for v in c.values()) if scan else 0
+            return {'width': size[0], 'height': size[1], 'scan_bytes': len(scan), 'entropy': round(ent, 2)}
+        i += 2 + n
+    raise ValueError('no SOS marker')
+
+
+def jpeg_problems(path, w, h):
+    try:
+        j = jpeg_info(open(path, 'rb').read())
+    except ValueError as e:
+        return ['%s: %s' % (os.path.basename(path), e)], {}
+    p = []
+    if (j['width'], j['height']) != (w, h):
+        p.append('JPEG is %dx%d, not %dx%d' % (j['width'], j['height'], w, h))
+    # a flat frame (an ISP that wrote nothing) compresses to a few bytes
+    # per 8x8 block; any scene is several times that
+    if j['scan_bytes'] < w * h // 40 or j['entropy'] < 7.0:
+        p.append('JPEG scan of %d bytes, entropy %.2f bits/byte (a flat or empty frame)' % (
+            j['scan_bytes'], j['entropy']))
+    return p, {'jpeg_' + k: v for k, v in j.items()}
+
+
+def nv21_problems(path, w, h):
+    """NV21/NV12 preview frame: the size of w x h (or of the stride and
+    slice the client names), a luma plane that is not flat, not mostly
+    zero and written to the last rows."""
+    size = os.path.getsize(path)
+    m = re.search(r'_stride\[(\d+)\]_slice\[(\d+)\]', os.path.basename(path))
+    sizes = set([w * h * 3 // 2] + ([int(m.group(1)) * int(m.group(2)) * 3 // 2] if m else []))
+    meas = {'yuv_bytes': size}
+    if size not in sizes:
+        return ['preview frame of %d bytes, not %s for %dx%d 4:2:0' % (size, sorted(sizes), w, h)], meas
+    stride = w if size == w * h * 3 // 2 else int(m.group(1))
+    with open(path, 'rb') as f:
+        luma = f.read(stride * h)
+    mean, std = luma_stats(path, stride * h)
+    meas.update({'luma_mean': mean, 'luma_std': std})
+    p = []
+    if std < 2.0:
+        p.append('flat luma (mean %.1f std %.2f)' % (mean, std))
+    if luma[::97].count(0) > len(luma[::97]) // 2:
+        p.append('luma mostly zero')
+    if not luma[stride * (h - h // 8):].strip(b'\0'):
+        p.append('the last rows are zero (frame not fully written)')
+    return p, meas
+
+
+def isp(env, name, kinds, trace=True):
+    """Run commands.<name>; (problems, measurements, notes, fw counts or
+    None) over the images of the given kinds (jpeg, yuv) and the firmware
+    log. Notes say what could not be read (partial, never a pass)."""
+    cmd = command_cfg(env, name)
+    run = run_client(env, name, trace=trace)
+    try:
+        w, h = int(cmd['width']), int(cmd['height'])
+        prob, meas, notes = run.problems(), run.meas(), []
+        for k, default, check in (('jpeg', '*.jpg', jpeg_problems), ('yuv', '*.yuv', nv21_problems)):
+            if k not in kinds:
+                continue
+            files = [f for f in run.files if fnmatch.fnmatch(os.path.basename(f), cmd.get(k, default))]
+            meas['%s_files' % k] = len(files)
+            if not files:
+                prob.append('no %s image (%s) written' % (k.upper(), cmd.get(k, default)))
+            for f in files:
+                p, m = check(f, w, h)
+                prob += p
+                meas.update(m)
+        summ, sp = summary_problems(env, run.log)
+        prob += sp
+        meas.update(('err_' + k, v) for k, v in summ.items())
+        fw = parse_fw(run.fw) if run.fw is not None else None
+        if fw:
+            prob += ['firmware log: %s' % x for x in fw_problems(fw)]
+            meas.update(('fw_' + k, v) for k, v in fw.items() if v is not None)
+        if trace:
+            notes += fw_notes(env, run)
+        return prob, meas, notes, fw
+    finally:
+        run.cleanup()
+
+
+def fw_notes(env, run):
+    """What of the ICP firmware log a traced run could not read."""
+    if run.fw is None:
+        return ['the ICP firmware log was not read (no tracefs instance with the %s event, or no ICP '
+                'debugfs under %s)' % (FW_EVENT, CAM_DEBUGFS)]
+    lack = [i for i in env.cfg('camx', 'icps', default=None) or [] if i not in run.traced]
+    return ['no firmware log from %s (debugfs log level not set)' % ' '.join(lack)] if lack else []
+
+
+def isp_result(what, prob, meas, notes, fw):
+    """fail on any problem; partial when something was not read."""
+    if prob:
+        return 'fail', '%s: %s' % (what, '; '.join(prob)), meas
+    if notes:
+        return 'partial', '%s; %s' % (what, '; '.join(notes)), meas
+    return 'pass', '%s; firmware %s: %d frames, 0 hardware failures' % (
+        what, fw['version'] or 'version not logged', fw['frames']), meas
+
+
+@test('camx.snapshot')
+def t_snapshot(env, command='snapshot'):
+    """CamX ISP snapshot: a JPEG through the ICP pipeline (SOI/EOI, SOF size, entropy) with a clean firmware log"""
+    need(env, 'CamX ISP snapshot')
+    prob, meas, notes, fw = isp(env, command, ('jpeg',))
+    return isp_result('command %s: JPEG %sx%s, scan %s bytes' % (
+        command, meas.get('jpeg_width', '-'), meas.get('jpeg_height', '-'), meas.get('jpeg_scan_bytes', '-')),
+        prob, meas, notes, fw)
+
+
+@test('camx.yuv')
+def t_yuv(env, command='snapshot'):
+    """CamX ISP preview: a 4:2:0 preview frame through the ICP pipeline (size, luma) with a clean firmware log"""
+    need(env, 'CamX ISP preview')
+    prob, meas, notes, fw = isp(env, command, ('yuv',))
+    return isp_result('command %s: preview %s bytes, luma std %s' % (
+        command, meas.get('yuv_bytes', '-'), meas.get('luma_std', '-')), prob, meas, notes, fw)
+
+
+@test('camx.isp_log')
+def t_isp_log(env, command='snapshot'):
+    """CamX ISP firmware log: frames completed, no hardware failure, CDM abort or frame error, error summary within limits
+
+    Partial when the client printed no error summary (CamX skips it on
+    some closes) or the firmware log was not read."""
+    need(env, 'CamX ISP firmware log')
+    prob, meas, notes, fw = isp(env, command, ())
+    if not any(k.startswith('err_') for k in meas):
+        notes.append('the client printed no error summary')
+    return isp_result('command %s in %.1f s' % (command, meas['seconds']), prob, meas, notes, fw)
+
+
+@test('camx.fps')
+def t_fps(env, command='snapshot'):
+    """CamX ISP preview frame rate, from the frame timing the client reports"""
+    need(env, 'CamX ISP preview frame rate')
+    cmd = command_cfg(env, command)
+    pat = env.cfg('camx', 'client', 'fps', default=None)
+    if not pat:
+        client(env)
+        return 'partial', 'the CamX client reports no frame timing the board profile names ' \
+            '(camx.client.fps); frame rate not measured'
+    run = run_client(env, command, trace=False)
+    run.cleanup()
+    got = [float(x) for x in re.findall(pat, run.log)]
+    meas = dict(run.meas(), fps=got[-1] if got else None)
+    prob = run.problems()
+    if not got:
+        prob.append('no frame rate in the client log (%s)' % pat)
+    elif cmd.get('fps') and got[-1] < 0.9 * float(cmd['fps']):
+        prob.append('fps %.2f below 90%% of %s' % (got[-1], cmd['fps']))
+    return ('fail' if prob else 'pass', 'command %s: fps %s%s' % (
+        command, meas['fps'], '; ' + '; '.join(prob) if prob else ''), meas)

@@ -338,6 +338,18 @@ requirements:
   QCA-010:
     title: "CamX sensor mounting orientation"
     test: camx.orientation
+  QCA-011:
+    title: "CamX ISP snapshot (JPEG)"
+    test: camx.snapshot
+  QCA-012:
+    title: "CamX ISP preview (YUV 4:2:0)"
+    test: camx.yuv
+  QCA-013:
+    title: "CamX ISP frames without hardware failures"
+    test: camx.isp_log
+  QCA-014:
+    title: "CamX ISP preview frame rate"
+    test: camx.fps
   QPL-001:
     title: "Remote processors running"
     test: platform.remoteproc
