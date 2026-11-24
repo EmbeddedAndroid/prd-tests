@@ -403,10 +403,10 @@ CamX: PrintErrorSummary: Num Unexpected Buffer Error Notification : 1
 ''')
 
 
-def fake_client(td, body):
+def fake_client(td, body, name='client.sh'):
     """A client script for camx.client.cmd: body runs in cwd with the
     command file as $1."""
-    p = os.path.join(td, 'client.sh')
+    p = os.path.join(td, name)
     with open(p, 'w') as f:
         f.write(body)
     return 'sh %s {cmdfile}' % p
@@ -769,6 +769,23 @@ def check_camx_power(cx, td):
             got, why, meas = core.Runner(core.Env(b), td).call('camx.power', args)
             if got != want or word not in why:
                 bad.append('camx.power %s %s: got %s %s, want %s' % (states, args, got, why[:160], want))
+        # the first frame stall: no image, ProcessHWFailure and a CDM
+        # abort in the firmware log; the run with the fix passes
+        stall = fake_client(td, 'exit 0\n', 'stall.sh')
+        for c, fw, states, want in ((cmd, FW_GOOD, ['off', 'off'], 'pass'), (stall, FW_STALL, ['off'], 'fail'),
+                                    (cmd, FW_STALL, ['off'], 'fail'), (cmd, '', ['off'], 'fail'),
+                                    (cmd, FW_GOOD, ['on'], 'fail'), (cmd, None, ['off', 'off'], 'partial')):
+            st = list(states)
+            cx.gdsc_state = lambda env: st.pop(0) if st else 'off'
+            b['camx']['client']['cmd'] = c
+            FakeTrace.log = [fw]
+            cx.Trace = tr0 if fw is None else FakeTrace
+            got, why, _ = core.Runner(core.Env(b), td).call('camx.first_frame', {})
+            cx.Trace = FakeTrace
+            if got != want:
+                bad.append('camx.first_frame %s fw %r: got %s %s, want %s' % (
+                    os.path.basename(c.split()[1]), (fw or '')[-30:], got, why[:160], want))
+        b['camx']['client']['cmd'] = cmd
         cx.klog = lambda since=None: KLOG_ICP
         got, why, _ = core.Runner(core.Env(b), td).call('camx.power', {'runs': 1, 'boot': True})
         if got != 'partial' or 'already opened' not in why:

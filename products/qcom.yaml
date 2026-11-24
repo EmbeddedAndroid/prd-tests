@@ -361,6 +361,9 @@ requirements:
     title: "CamX power up after a reboot"
     test: camx.power
     args: {runs: 1, boot: true}
+  QCA-018:
+    title: "CamX ISP first frame after a camera power up"
+    test: camx.first_frame
   QPL-001:
     title: "Remote processors running"
     test: platform.remoteproc

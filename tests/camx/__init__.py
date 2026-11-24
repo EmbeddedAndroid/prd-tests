@@ -1102,3 +1102,19 @@ def t_power(env, runs=3, command='snapshot', boot=False):
         return 'partial', 'the camera was already opened in this boot (ICP firmware download in the kernel ' \
             'log); run this requirement first after a reboot to measure it'
     return cycles(env, command, int(runs))
+
+
+@test('camx.first_frame')
+def t_first_frame(env, command='snapshot'):
+    """CamX ISP first frame after a power up: a snapshot through the offline (ICP) pipeline completes with a clean firmware log
+
+    The camera power domain must be off before the run, so the run
+    starts from a full power up of the camera. It fails when the
+    offline pipeline stalls on its first request, the way it does when
+    the power up omits the AXI sleep stage sequence the camera needs:
+    the firmware logs ProcessHWFailure and a CDM "Loop reach" abort, no
+    request completes (no CAMERAICP_SUCCESS) and no JPEG is written.
+    It is partial when the firmware log or the power state cannot be
+    read, never a pass."""
+    need(env, 'CamX ISP first frame after a power up')
+    return cycles(env, command, 1, kinds=('jpeg',))
