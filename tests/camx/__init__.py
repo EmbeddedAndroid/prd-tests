@@ -38,9 +38,12 @@ command file instead. The profile gives the client and its commands:
               opened the stack yet, also read for the orientation report>
               (default snapshot)
       orientation: <pattern of a reported roll, or of (camera id, roll)>
+      fps: <pattern of the frame rate the client reports>
       commands:
         <name>: {file: <command file text>, width: W, height: H,
-                 jpeg: <glob>, yuv: <glob>, video: <glob>, raw: <glob>}
+                 jpeg: <glob>, yuv: <glob>, video: <glob>, raw: <glob>,
+                 fps: <rate the command asks for>, fps_re: <pattern for
+                 this command instead of client.fps>}
 
 A run is the client with one command file; its images are the files it
 created in cwd (removed afterwards unless PRD_CAMX_KEEP is set). The ICP
@@ -951,18 +954,23 @@ def isp(env, name, kinds, trace=True):
                 if 'rough_max' in m:
                     m['rough_max'] = max(m['rough_max'], meas.get('rough_max', 0))
                 meas.update(m)
-        summ, sp = summary_problems(env, run.log)
-        prob += sp
-        meas.update(('err_' + k, v) for k, v in summ.items())
-        fw = parse_fw(run.fw) if run.fw is not None else None
-        if fw:
-            prob += ['firmware log: %s' % x for x in fw_problems(fw)]
-            meas.update(('fw_' + k, v) for k, v in fw.items() if v is not None)
-        if trace:
-            notes += fw_notes(env, run)
-        return prob, meas, notes, fw
+        lp, lm, notes, fw = log_checks(env, run, trace)
+        meas.update(lm)
+        return prob + lp, meas, notes, fw
     finally:
         run.cleanup()
+
+
+def log_checks(env, run, trace=True):
+    """(problems, measurements, notes, fw counts or None) of a run's error
+    summary and ICP firmware log."""
+    summ, prob = summary_problems(env, run.log)
+    meas = dict(('err_' + k, v) for k, v in summ.items())
+    fw = parse_fw(run.fw) if run.fw is not None else None
+    if fw:
+        prob += ['firmware log: %s' % x for x in fw_problems(fw)]
+        meas.update(('fw_' + k, v) for k, v in fw.items() if v is not None)
+    return prob, meas, fw_notes(env, run) if trace else [], fw
 
 
 def fw_notes(env, run):
@@ -1018,10 +1026,10 @@ def t_isp_log(env, command='snapshot'):
 
 @test('camx.fps')
 def t_fps(env, command='snapshot'):
-    """CamX ISP preview frame rate, from the frame timing the client reports"""
+    """CamX ISP frame rate, from the frame timing the client reports (the command's fps_re, else camx.client.fps)"""
     need(env, 'CamX ISP preview frame rate')
     cmd = command_cfg(env, command)
-    pat = env.cfg('camx', 'client', 'fps', default=None)
+    pat = cmd.get('fps_re') or env.cfg('camx', 'client', 'fps', default=None)
     if not pat:
         client(env)
         return 'partial', 'the CamX client reports no frame timing the board profile names ' \
@@ -1279,3 +1287,4 @@ def t_video(env, command='video-4k'):
             prob.append('%d CAMNOC UBWC decode errors in the kernel log' % meas['ubwc_decode_errors'])
     return isp_result('command %s: %s video frames, Y roughness at most %s' % (
         command, meas.get('video_files', '-'), meas.get('rough_max', '-')), prob, meas, notes, fw)
+

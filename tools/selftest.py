@@ -711,6 +711,13 @@ def check_camx_isp(cx, td):
         got, why, _ = core.Runner(core.Env(b), td).call('camx.fps', {})
         if got != 'fail' or 'no frame rate' not in why:
             bad.append('camx.fps without a rate in the log: %s %s' % (got, why))
+        # a command's own pattern stands in for a profile without one
+        del b['camx']['client']['fps']
+        b['camx']['client']['commands']['snapshot']['fps_re'] = r'rate ([\d.]+)'
+        got, why, _ = core.Runner(core.Env(b), td).call('camx.fps', {})
+        if got != 'fail' or r'rate ([\d.]+)' not in why:
+            bad.append('camx.fps with the command pattern only: %s %s' % (got, why))
+        del b['camx']['client']['commands']['snapshot']['fps_re']
         bad += check_camx_video(cx, td, rng)
     finally:
         cx.Trace = tr0

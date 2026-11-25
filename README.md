@@ -233,7 +233,8 @@ dictionaries key by key.
   `commands` (command file text, image size and globs), the command
   that makes CamX probe the sensors when nothing opened the stack yet
   (`probe`, default `snapshot`) and the patterns of its `orientation`
-  (a roll, or a camera id and a roll) and `fps` reports; `icps` lists
+  (a roll, or a camera id and a roll) and `fps` reports (a command's
+  `fps_re` replaces `fps` for it); `icps` lists
   the ICPs whose firmware log the tests read and `firmware` their
   files; `gdsc` names the camera power domain as the genpd summary
   lists it (it must power off within `gdsc_off_s` seconds of a close,
