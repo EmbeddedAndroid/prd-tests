@@ -418,6 +418,48 @@ requirements:
     title: "CamX HLG video request"
     test: camx.streams
     args: {command: video-hlg, report: {hdr_profile: 2}, unverified: the HLG transfer of the P010 frames is not measured}
+  QCA-033:
+    title: "CamX auto exposure follows the exposure compensation"
+    test: camx.phases
+    args: {command: aec, expect: [up, down], step: 1.15, bounds: [25, 200], report: {ae: 'ON'}}
+  QCA-034:
+    title: "CamX manual exposure time"
+    test: camx.phases
+    args: {command: manual-exp, expect: [up], step: 1.5, report: {exposure: 30000000, ae: 'OFF'}}
+  QCA-035:
+    title: "CamX auto white balance (grey world)"
+    test: camx.phases
+    args: {command: awb, stat: grey, bounds: [0, 20], report: {awb: AUTO}}
+  QCA-036:
+    title: "CamX manual white balance by colour temperature"
+    test: camx.phases
+    args: {command: manual-wb, stat: chroma, expect: [moves], step: 4, report: {awb: 'OFF'}}
+  QCA-037:
+    title: "CamX basic 3A: auto exposure and auto white balance"
+    tests:
+    - {test: camx.phases, args: {command: aec, expect: [up, down], step: 1.15, bounds: [25, 200], report: {ae: 'ON'}}}
+    - {test: camx.phases, args: {command: awb, stat: grey, bounds: [0, 20], report: {awb: AUTO}}}
+  QCA-038:
+    title: "CamX manual 3A: manual exposure and white balance"
+    tests:
+    - {test: camx.phases, args: {command: manual-exp, expect: [up], step: 1.5, report: {exposure: 30000000, ae: 'OFF'}}}
+    - {test: camx.phases, args: {command: manual-wb, stat: chroma, expect: [moves], step: 4, report: {awb: 'OFF'}}}
+  QCA-039:
+    title: "CamX JPEG quality control"
+    test: camx.phases
+    args: {command: jpeg-quality, stat: dqt, expect: [up], step: 1.5, report: {jpeg_quality: 50}}
+  QCA-040:
+    title: "CamX preview exposure simulation at the normal frame rate (manual long exposure)"
+    test: camx.phases
+    args: {command: ev-sim, expect: [up], step: 1.2, fps: 27}
+  QCA-041:
+    title: "CamX preview exposure simulation at the normal frame rate (shutter priority)"
+    test: camx.phases
+    args: {command: ev-sim-sp, expect: [same], step: 1.5, fps: 27}
+  QCA-042:
+    title: "CamX digital zoom"
+    test: camx.zoom
+    args: {command: zoom, zoom: 2.0}
   QPL-001:
     title: "Remote processors running"
     test: platform.remoteproc

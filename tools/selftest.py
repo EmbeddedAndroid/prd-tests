@@ -516,6 +516,7 @@ def check_camx_client():
     cx.Trace = FakeTrace
     try:
         bad += check_camx_streams(cx, td)
+        bad += check_camx_phases(cx, td)
     finally:
         cx.Trace = tr0
     return bad
@@ -1024,6 +1025,99 @@ def check_camx_streams(cx, td):
     got, why, _ = core.Runner(core.Env(b), td).call('camx.streams', {'command': 'c'})
     if got != 'fail' or 'known kinds' not in why:
         bad.append('camx.streams with an unknown output kind: %s %s' % (got, why))
+    return bad
+
+
+def staged(td, name, frames, log=''):
+    """A fake client that copies frames ({file name: path}) into its cwd
+    and prints log; returns its camx.client.cmd."""
+    body = ''.join('cp %s "%s"\n' % (src, n) for n, src in frames.items())
+    return fake_client(td, body + 'printf "%%s\\n" "%s"\nexit 0\n' % log, name)
+
+
+def check_camx_phases(cx, td):
+    """camx.phases and camx.zoom on fake clients: a control that moves the
+    frames the way the row expects passes; no change, a frame left out,
+    a report missing or wrong, or a low frame rate fails."""
+    bad = []
+    w, h = 64, 48
+    cwd = os.path.join(td, 'ph-out')
+    os.makedirs(cwd, exist_ok=True)
+    src = {}
+    for n, d in (('l50', yuv(w, h, 50)), ('l80', yuv(w, h, 80)), ('l82', yuv(w, h, 82, seed=2)),
+                 ('l120', yuv(w, h, 120)), ('warm', yuv(w, h, 80, 136, 120)), ('grey', yuv(w, h, 80, 130, 126)),
+                 ('cast', yuv(w, h, 80, 160, 100))):
+        src[n] = os.path.join(td, n + '.yuv')
+        open(src[n], 'wb').write(d)
+    noise = bytes(range(256)) * 40
+    for n, q in (('q2', 2), ('q6', 6)):
+        src[n] = os.path.join(td, n + '.jpg')
+        open(src[n], 'wb').write(jpeg(w, h, noise).replace(b'\xff\xdb\x00\x43' + bytes(65),
+                                                          b'\xff\xdb\x00\x43\x00' + bytes([q]) * 64))
+
+    def pv(i):
+        return 'preview_w[64]_h[48]_id[%d]_stride[64]_slice[48]_x.yuv' % i
+    for frames, log, args, phases, want, word in (
+            (['l80', 'l80', 'l120', 'l120', 'l50', 'l50'], 'frame:3 ae mode:AE MODE ON',
+             {'expect': ['up', 'down'], 'step': 1.15, 'bounds': [25, 200], 'report': {'ae': 'ON'}}, 3, 'pass',
+             'luma by phase'),
+            (['l80', 'l80', 'l82', 'l82', 'l50', 'l50'], 'frame:3 ae mode:AE MODE ON',
+             {'expect': ['up', 'down'], 'step': 1.15}, 3, 'fail', 'not up'),
+            (['l80', 'l80', 'l120', 'l120', 'l50'], '', {'expect': ['up', 'down']}, 3, 'fail', '5 images'),
+            (['l80', 'l120'], '', {'expect': ['up'], 'report': {'ae': 'OFF'}}, 2, 'fail', 'reported no ae'),
+            (['l80', 'l120'], 'frame:9 ae mode:AE MODE ON', {'expect': ['up'], 'report': {'ae': 'OFF'}}, 2,
+             'fail', 'ae reported ON, not OFF'),
+            (['l80', 'l120'], 'frame:2 exposure value = 29900000', {'expect': ['up'],
+                                                                      'report': {'exposure': 30000000}}, 2,
+             'pass', ''),
+            (['l80', 'l120'], 'PROFILE_PREVIEW_FRAMES_PER_SECOND: 12.0', {'expect': ['up'], 'fps': 27}, 2, 'fail',
+             'fps 12.00 below 27'),
+            (['l80', 'l120'], 'PROFILE_PREVIEW_FRAMES_PER_SECOND: 29.9', {'expect': ['up'], 'fps': 27}, 2, 'pass',
+             ''),
+            (['l80', 'warm'], '', {'stat': 'chroma', 'expect': ['moves']}, 2, 'pass', ''),
+            (['l80', 'l82'], '', {'stat': 'chroma', 'expect': ['moves']}, 2, 'fail', 'not moves'),
+            (['grey'], '', {'stat': 'grey', 'bounds': [0, 20]}, 1, 'pass', ''),
+            (['cast'], '', {'stat': 'grey', 'bounds': [0, 20]}, 1, 'fail', 'outside [0, 20]'),
+            (['q2', 'q6'], '', {'stat': 'dqt', 'expect': ['up'], 'step': 1.5}, 2, 'pass', 'dqt by phase [128.0, 384.0]'),
+            (['q2', 'q2'], '', {'stat': 'dqt', 'expect': ['up'], 'step': 1.5}, 2, 'fail', 'not up')):
+        names = {(('snapshot_w[64]_h[48]_id[%d]_x.jpg' % i) if f.startswith('q') else pv(i)): src[f]
+                 for i, f in enumerate(frames)}
+        b = camx_board(staged(td, 'ph.sh', names, log), cwd, {'c': {'file': 'Q', 'width': w, 'height': h,
+                                                                   'phases': phases}},
+                       fps=r'PROFILE_PREVIEW_FRAMES_PER_SECOND: ([\d.]+)')
+        FakeTrace.log = [FW_GOOD]
+        got, why, meas = core.Runner(core.Env(b), td).call('camx.phases', dict(args, command='c'))
+        if got != want or word not in why or os.listdir(cwd):
+            bad.append('camx.phases %s %s: got %s %s, want %s (%s)' % (frames, args, got, why[:200], want, word))
+    # a row naming a report the profile does not give fails as missing
+    b['camx']['client']['reports'] = {}
+    got, why, _ = core.Runner(core.Env(b), td).call('camx.phases', {'command': 'c', 'expect': ['up'],
+                                                                    'report': {'ae': 'ON'}})
+    if got != 'fail' or "report 'ae'" not in why:
+        bad.append('camx.phases without the report in the profile: %s %s' % (got, why))
+    # zoom: the zoomed frame is the centre of the one before, pixel doubled
+    def pat(x, y):
+        return 40 + 4 * x + 3 * y + 60 * ((x // 5 + y // 7) % 2)
+    before = yuv(w, h, 0, px=pat)
+    zoomed = yuv(w, h, 0, px=lambda x, y: pat(16 + x // 2, 12 + y // 2))
+    flat = yuv(w, h, 0, px=lambda x, y: 98 + 6 * (x % 2))
+    for n, d in (('zb', before), ('zz', zoomed), ('zf', flat)):
+        src[n] = os.path.join(td, n + '.yuv')
+        open(src[n], 'wb').write(d)
+    ok = 'active size: 4000 x 3000, cropRegion:[1000,750,2000,1500]\nframe:9 ZOOM:crop region[1000,750,2000,1500]'
+    for frames, log, want, word in ((['zb', 'zz'], ok, 'pass', 'crop [1000, 750, 2000, 1500]'),
+                                    (['zb', 'zb'], ok, 'fail', 'no better than the whole'),
+                                    (['zb', 'zz'], ok.replace('[1000,750,2000,1500]', '[0,0,4000,3000]'), 'fail',
+                                     'not 1/2 of the 4000x3000'),
+                                    (['zb', 'zz'], ok.replace('750,2000', '0,2000'), 'fail', 'not centred'),
+                                    (['zb', 'zz'], '', 'fail', 'reported no active'),
+                                    (['zf', 'zf'], ok, 'partial', 'too little structure')):
+        b = camx_board(staged(td, 'zoom.sh', {pv(i): src[f] for i, f in enumerate(frames)}, log), cwd,
+                       {'zoom': {'file': 'Q', 'width': w, 'height': h, 'phases': 2}})
+        FakeTrace.log = [FW_GOOD]
+        got, why, meas = core.Runner(core.Env(b), td).call('camx.zoom', {})
+        if got != want or word not in why or os.listdir(cwd):
+            bad.append('camx.zoom %s %r: got %s %s, want %s (%s)' % (frames, log[-30:], got, why[:200], want, word))
     return bad
 
 

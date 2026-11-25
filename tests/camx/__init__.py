@@ -48,13 +48,15 @@ command file instead. The profile gives the client and its commands:
         <name>: {file: <command file text>, width: W, height: H,
                  jpeg: <glob>, yuv: <glob>, video: <glob>, raw: <glob>,
                  fps: <rate the command asks for>, fps_re: <pattern for
-                 this command instead of client.fps>,
+                 this command instead of client.fps>, phases: <n>,
                  outputs: [{kind: jpeg|yuv|video|raw|p010, prefix: P,
                             width: W, height: H, count: N, stride: S,
                             distinct: true, gap_s: G}]}
 
-A command with outputs names every stream it writes (camx.streams):
-files <prefix>_w[W]_h[H]_... of the kind's extension.
+A command with phases changes a control between groups of dumped frames
+(camx.phases, camx.zoom): its images, in frame order, split into that
+many equal groups. A command with outputs names every stream it writes
+(camx.streams): files <prefix>_w[W]_h[H]_... of the kind's extension.
 
 A run is the client with one command file; its images are the files it
 created in cwd (removed afterwards unless PRD_CAMX_KEEP is set). The ICP
@@ -1469,5 +1471,241 @@ def t_streams(env, command, report=None, unverified=None):
         meas.update(lm)
         return isp_result('command %s: %s' % (command, ', '.join(parts)), prob + p + lp, meas,
                           notes + ([unverified] if unverified else []), fw)
+    finally:
+        run.cleanup()
+
+
+# Frames a command dumps in phases around a control change
+# (commands.<name>.phases), in frame order.
+def yuv_pitch(path, w, h):
+    """(row pitch, rows) of the luma plane of a 4:2:0 frame file: w x h
+    when the client wrote it unpadded, else the stride and slice it names."""
+    m = re.search(r'_stride\[(\d+)\]_slice\[(\d+)\]', os.path.basename(path))
+    if os.path.getsize(path) != w * h * 3 // 2 and m and \
+            os.path.getsize(path) == int(m.group(1)) * int(m.group(2)) * 3 // 2:
+        return int(m.group(1)), int(m.group(2))
+    return w, h
+
+
+def luma_grid(path, w, h, box=None, gx=32, gy=18, lines=4, step=4):
+    """Block means (gy rows of gx blocks) of the luma plane inside box
+    (x, y, width, height; default the whole frame), sampled."""
+    pitch, _ = yuv_pitch(path, w, h)
+    x0, y0, bw, bh = box or (0, 0, w, h)
+    step = max(1, min(step, bw // (2 * gx)))
+    out = []
+    with open(path, 'rb') as f:
+        for j in range(gy):
+            sums, cnt = [0] * gx, [0] * gx
+            for k in range(lines):
+                f.seek((y0 + int((j + (k + 0.5) / lines) * bh / gy)) * pitch + x0)
+                row = f.read(bw)
+                for x in range(0, len(row), step):
+                    sums[x * gx // bw] += row[x]
+                    cnt[x * gx // bw] += 1
+            out += [s / float(c) if c else 0.0 for s, c in zip(sums, cnt)]
+    return out
+
+
+def corr(a, b):
+    """Correlation of two equal length lists; None when one is constant."""
+    ma, mb = sum(a) / float(len(a)), sum(b) / float(len(b))
+    va, vb = sum((x - ma) ** 2 for x in a), sum((y - mb) ** 2 for y in b)
+    if not va or not vb:
+        return None
+    return round(sum((x - ma) * (y - mb) for x, y in zip(a, b)) / math.sqrt(va * vb), 3)
+
+
+def spread(g):
+    m = sum(g) / float(len(g))
+    return (sum((x - m) ** 2 for x in g) / len(g)) ** 0.5
+
+
+def chroma_means(path, w, h, step=5):
+    """Means of the two interleaved chroma samples of a semi-planar 4:2:0
+    frame, in file order (Cr, Cb for NV21; Cb, Cr for NV12)."""
+    pitch, rows = yuv_pitch(path, w, h)
+    sa = sb = na = nb = 0
+    with open(path, 'rb') as f:
+        for r in range(0, rows // 2, max(1, rows // 128)):
+            f.seek(pitch * rows + r * pitch)
+            row = f.read(w)
+            a, b = row[0::2][::step], row[1::2][::step]
+            sa, sb, na, nb = sa + sum(a), sb + sum(b), na + len(a), nb + len(b)
+    return (round(sa / float(na), 2) if na else 128.0), (round(sb / float(nb), 2) if nb else 128.0)
+
+
+def dqt_sum(d):
+    """Sum of the first quantization table of a JPEG (larger is coarser);
+    ValueError when there is none before the scan."""
+    i = 2
+    while i + 4 <= len(d):
+        if d[i] != 0xff:
+            raise ValueError('no marker at byte %d' % i)
+        m = d[i + 1]
+        if m == 0xff:
+            i += 1
+            continue
+        n = struct.unpack('>H', d[i + 2:i + 4])[0]
+        if m == 0xdb:
+            if d[i + 4] >> 4:
+                return sum(struct.unpack('>64H', d[i + 5:i + 133]))
+            return sum(d[i + 5:i + 69])
+        if m == 0xda:
+            break
+        i += 2 + n
+    raise ValueError('no DQT marker before the scan')
+
+
+STATS = ('luma', 'chroma', 'grey', 'dqt')
+
+
+def phase_stat(stat, path, w, h):
+    if stat == 'dqt':
+        return float(dqt_sum(open(path, 'rb').read()))
+    if stat == 'luma':
+        g = luma_grid(path, w, h)
+        return sum(g) / len(g)
+    a, b = chroma_means(path, w, h)
+    return a - b if stat == 'chroma' else max(abs(a - 128), abs(b - 128))
+
+
+def phase_problems(stat, vals, expect, step, bounds):
+    """Each phase after the first against the first: up, down, moves or
+    same by a ratio of step (luma, dqt) or a difference of step (chroma,
+    grey); the first within bounds."""
+    ratio = stat in ('luma', 'dqt')
+    step = float(step if step is not None else 1.2 if ratio else 4)
+    p = []
+    if bounds and not float(bounds[0]) <= vals[0] <= float(bounds[1]):
+        p.append('phase 1 %s %.2f outside [%s, %s]' % (stat, vals[0], bounds[0], bounds[1]))
+    b = vals[0]
+    for i, (want, v) in enumerate(zip(expect, vals[1:]), 2):
+        up, down = (v >= b * step, v * step <= b) if ratio else (v - b >= step, b - v >= step)
+        ok = {'up': up, 'down': down, 'moves': up or down, 'same': not (up or down)}.get(want)
+        if ok is None:
+            p.append('phase %d: expectation %r is not up, down, moves or same' % (i, want))
+        elif not ok:
+            p.append('phase %d %s %.2f against %.2f in phase 1: not %s by %s' % (
+                i, stat, v, b, want, '%gx' % step if ratio else step))
+    return p
+
+
+def phase_files(run, cmd, kind):
+    pat = cmd.get(kind, 'snapshot_*.jpg' if kind == 'jpeg' else 'preview_*.yuv')
+    return pat, sorted((f for f in run.files if fnmatch.fnmatch(os.path.basename(f), pat)), key=frame_id)
+
+
+def last_fps(env, cmd, log):
+    pat = cmd.get('fps_re') or env.cfg('camx', 'client', 'fps', default=None)
+    got = [float(x) for x in re.findall(pat, log)] if pat else []
+    return pat, got[-1] if got else None
+
+
+@test('camx.phases')
+def t_phases(env, command, stat='luma', expect=(), step=None, bounds=None, report=None, fps=None):
+    """CamX control: frames before and after the command changes a control (exposure, white balance, JPEG quality) move the way it asks
+
+    stat is compared per phase (the command's images in frame order,
+    split into its number of phases): luma (mean Y), chroma (difference
+    of the two chroma means), grey (largest distance of a chroma mean
+    from neutral) or dqt (sum of the JPEG luma quantization table).
+    expect gives, for every phase after the first, up, down, moves or
+    same against the first: by a ratio of step (default 1.2) for luma
+    and dqt, a difference of step (default 4) for chroma and grey.
+    bounds is the [low, high] of the first phase; report the client
+    reports expected at the end; fps the lowest frame rate the client
+    may report at the end."""
+    need(env, 'CamX control (%s)' % stat)
+    cmd = command_cfg(env, command)
+    n = int(cmd.get('phases', 1))
+    if stat not in STATS or len(expect) != n - 1:
+        return 'fail', 'row asks for %s with %d changes; stats are %s and command %s has %d phases' % (
+            stat, len(expect), ' '.join(STATS), command, n)
+    need_reports(env, report or {})
+    if fps and not (cmd.get('fps_re') or env.cfg('camx', 'client', 'fps', default=None)):
+        raise Missing('the board profile names no client frame rate pattern (camx.client.fps)', hw='camx')
+    kind = 'jpeg' if stat == 'dqt' else 'yuv'
+    w, h = int(cmd['width']), int(cmd['height'])
+    run = run_client(env, command)
+    try:
+        prob, meas = run.problems(), run.meas()
+        pat, files = phase_files(run, cmd, kind)
+        meas['files'] = len(files)
+        for f in files:
+            prob += (jpeg_problems if kind == 'jpeg' else nv21_problems)(f, w, h)[0]
+        if not files or len(files) % n:
+            prob.append('%d images (%s) for %d phases' % (len(files), pat, n))
+        elif not prob:
+            k = len(files) // n
+            vals = [round(sum(phase_stat(stat, f, w, h) for f in files[i * k:(i + 1) * k]) / k, 2)
+                    for i in range(n)]
+            meas[stat] = vals
+            prob += phase_problems(stat, vals, expect, step, bounds)
+        p, m = report_problems(env, run.log, report)
+        prob += p
+        meas.update(m)
+        if fps:
+            pat, meas['fps'] = last_fps(env, cmd, run.log)
+            if meas['fps'] is None:
+                prob.append('no frame rate in the client log (%s)' % pat)
+            elif meas['fps'] < float(fps):
+                prob.append('fps %.2f below %s' % (meas['fps'], fps))
+        lp, lm, notes, fw = log_checks(env, run)
+        meas.update(lm)
+        return isp_result('command %s: %s by phase %s' % (command, stat, meas.get(stat, '-')),
+                          prob + lp, meas, notes, fw)
+    finally:
+        run.cleanup()
+
+
+@test('camx.zoom')
+def t_zoom(env, command='zoom', zoom=2.0):
+    """CamX digital zoom: CamX reports the centred 1/zoom crop, and the zoomed frame shows the centre of the frame before it
+
+    The command dumps preview frames in two phases, before and after it
+    sets the zoom. By block luma the last zoomed frame must match the
+    centre 1/zoom of the last frame before (correlation at least 0.8)
+    better than it matches the whole of it. Partial when that centre
+    has too little structure to tell (block luma spread below 2)."""
+    need(env, 'CamX digital zoom')
+    cmd = command_cfg(env, command)
+    need_reports(env, ('active', 'crop'))
+    w, h, zoom = int(cmd['width']), int(cmd['height']), float(zoom)
+    run = run_client(env, command)
+    try:
+        prob, meas, notes = run.problems(), run.meas(), []
+        pat, files = phase_files(run, cmd, 'yuv')
+        for f in files:
+            prob += nv21_problems(f, w, h)[0]
+        got = reports(env, run.log)
+        a, c = got.get('active'), got.get('crop')
+        if not isinstance(a, tuple) or not isinstance(c, tuple) or len(a) != 2 or len(c) != 4:
+            prob.append('the client reported no active array size and crop region (%s, %s)' % (a, c))
+        else:
+            meas.update(active=list(a), crop=list(c))
+            if abs(c[2] - a[0] / zoom) > 0.02 * a[0] or abs(c[3] - a[1] / zoom) > 0.02 * a[1]:
+                prob.append('crop region %s is not 1/%g of the %dx%d active array' % (list(c), zoom, a[0], a[1]))
+            elif abs(c[0] - (a[0] - c[2]) / 2.0) > 0.02 * a[0] or abs(c[1] - (a[1] - c[3]) / 2.0) > 0.02 * a[1]:
+                prob.append('crop region %s is not centred in the %dx%d active array' % (list(c), a[0], a[1]))
+        if len(files) < 2 or len(files) % 2:
+            prob.append('%d preview frames (%s), want two equal phases' % (len(files), pat))
+        elif not prob:
+            before, after = files[len(files) // 2 - 1], files[-1]
+            cw, ch = int(w / zoom), int(h / zoom)
+            centre = luma_grid(before, w, h, ((w - cw) // 2, (h - ch) // 2, cw, ch))
+            zg = luma_grid(after, w, h)
+            rc, rw = corr(zg, centre), corr(zg, luma_grid(before, w, h))
+            meas.update(corr_centre=rc, corr_whole=rw)
+            if spread(centre) < 2 or rc is None:
+                notes.append('the frame centre has too little structure to compare (block luma spread %.2f)' %
+                             spread(centre))
+            elif rc < 0.8 or (rw is not None and rc <= rw):
+                prob.append('the zoomed frame matches the centre of the frame before (correlation %s) no better '
+                            'than the whole of it (%s)' % (rc, rw))
+        lp, lm, ln, fw = log_checks(env, run)
+        meas.update(lm)
+        return isp_result('command %s: zoom %g, crop %s, correlation with the centre %s' % (
+            command, zoom, meas.get('crop', '-'), meas.get('corr_centre', '-')), prob + lp, meas, notes + ln, fw)
     finally:
         run.cleanup()
