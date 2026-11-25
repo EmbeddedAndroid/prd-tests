@@ -51,6 +51,19 @@ camx:
         height: 1080
         jpeg: snapshot_*.jpg
         yuv: preview_*.yuv
+      # 3840x2160 video: the graph where the OFE reads the TFE full
+      # output as Bayer UBWC
+      video-4k:
+        file: |
+          A:id=0,vsize=3840x2160,vformat=yuv420,fpsrange=30-30
+          W:4
+          P:3
+          W:6
+          D
+          Q
+        width: 3840
+        height: 2160
+        video: video_*.yuv
       raw-0:
         file: |
           A:id=0,psize=4056x3040,pformat=raw10,ssize=4056x3040,sformat=raw10

@@ -40,7 +40,7 @@ command file instead. The profile gives the client and its commands:
       orientation: <pattern of a reported roll, or of (camera id, roll)>
       commands:
         <name>: {file: <command file text>, width: W, height: H,
-                 jpeg: <glob>, yuv: <glob>, raw: <glob>}
+                 jpeg: <glob>, yuv: <glob>, video: <glob>, raw: <glob>}
 
 A run is the client with one command file; its images are the files it
 created in cwd (removed afterwards unless PRD_CAMX_KEEP is set). The ICP
@@ -892,16 +892,53 @@ def nv21_problems(path, w, h):
     return p, meas
 
 
+# Y roughness (mean |difference| of neighbouring luma bytes) of real
+# scenes on the Eliza EVK at 3840x2160 is 0.3 to 9; frames scrambled in
+# blocks by an OFE that cannot decode its Bayer UBWC input are 47 to 85
+ROUGH_MAX = 10
+
+
+def roughness(path, w, h, stride, rows=64):
+    """Mean |difference| of horizontally neighbouring luma bytes over
+    rows rows in the middle of the frame."""
+    rows = min(rows, h)
+    with open(path, 'rb') as f:
+        f.seek(stride * ((h - rows) // 2))
+        data = f.read(stride * rows)
+    tot = n = 0
+    for r in range(len(data) // stride):
+        row = data[r * stride:r * stride + w]
+        tot += sum(abs(a - b) for a, b in zip(row, row[1:]))
+        n += len(row) - 1
+    return round(tot / n, 2) if n else None
+
+
+def video_problems(path, w, h):
+    """A video frame: the preview checks, and luma no rougher than a real
+    scene (a frame scrambled in blocks is far rougher)."""
+    p, meas = nv21_problems(path, w, h)
+    if p:
+        return p, meas
+    m = re.search(r'_stride\[(\d+)\]', os.path.basename(path))
+    stride = w if meas['yuv_bytes'] == w * h * 3 // 2 else int(m.group(1))
+    r = roughness(path, w, h, stride)
+    meas['rough_max'] = r
+    if r > ROUGH_MAX:
+        p.append('%s: Y roughness %.2f > %d (a scrambled frame)' % (os.path.basename(path), r, ROUGH_MAX))
+    return p, meas
+
+
 def isp(env, name, kinds, trace=True):
     """Run commands.<name>; (problems, measurements, notes, fw counts or
-    None) over the images of the given kinds (jpeg, yuv) and the firmware
+    None) over the images of the given kinds (jpeg, yuv, video) and the firmware
     log. Notes say what could not be read (partial, never a pass)."""
     cmd = command_cfg(env, name)
     run = run_client(env, name, trace=trace)
     try:
         w, h = int(cmd['width']), int(cmd['height'])
         prob, meas, notes = run.problems(), run.meas(), []
-        for k, default, check in (('jpeg', '*.jpg', jpeg_problems), ('yuv', '*.yuv', nv21_problems)):
+        for k, default, check in (('jpeg', '*.jpg', jpeg_problems), ('yuv', '*.yuv', nv21_problems),
+                                  ('video', 'video_*.yuv', video_problems)):
             if k not in kinds:
                 continue
             files = [f for f in run.files if fnmatch.fnmatch(os.path.basename(f), cmd.get(k, default))]
@@ -911,6 +948,8 @@ def isp(env, name, kinds, trace=True):
             for f in files:
                 p, m = check(f, w, h)
                 prob += p
+                if 'rough_max' in m:
+                    m['rough_max'] = max(m['rough_max'], meas.get('rough_max', 0))
                 meas.update(m)
         summ, sp = summary_problems(env, run.log)
         prob += sp
@@ -1217,3 +1256,26 @@ def t_no_firmware(env, command='snapshot'):
         return 'partial', '%s, a clean error; with the firmware restored the next run fails: %s' % (
             what, '; '.join(p)), meas
     return 'pass', '%s, a clean error; restored, the next run writes a JPEG again' % what, meas
+
+
+@test('camx.video')
+def t_video(env, command='video-4k'):
+    """CamX ISP video: video frames through the offline (ICP) pipeline, none scrambled, with no CAMNOC UBWC decode error and a clean firmware log
+
+    The 4K video graph is the one where the OFE reads the TFE full
+    output as Bayer UBWC. When the TFE writes it without the RCS mode
+    CamX asked for in the acquire, the OFE cannot decode it: the kernel
+    logs "OFE Read UBWC Decode error" and every frame is scrambled in
+    blocks while the pipeline still reports success."""
+    need(env, 'CamX ISP video')
+    m = mark('video')
+    prob, meas, notes, fw = isp(env, command, ('video',))
+    log = klog_after(m)
+    if log is None:
+        notes.append('the kernel log after the run was not read (no mark in it)')
+    else:
+        meas['ubwc_decode_errors'] = len(re.findall(r'UBWC Decode error', log))
+        if meas['ubwc_decode_errors']:
+            prob.append('%d CAMNOC UBWC decode errors in the kernel log' % meas['ubwc_decode_errors'])
+    return isp_result('command %s: %s video frames, Y roughness at most %s' % (
+        command, meas.get('video_files', '-'), meas.get('rough_max', '-')), prob, meas, notes, fw)

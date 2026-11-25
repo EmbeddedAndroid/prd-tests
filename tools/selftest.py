@@ -711,8 +711,58 @@ def check_camx_isp(cx, td):
         got, why, _ = core.Runner(core.Env(b), td).call('camx.fps', {})
         if got != 'fail' or 'no frame rate' not in why:
             bad.append('camx.fps without a rate in the log: %s %s' % (got, why))
+        bad += check_camx_video(cx, td, rng)
     finally:
         cx.Trace = tr0
+    return bad
+
+
+def check_camx_video(cx, td, rng):
+    """camx.video on a fake client: smooth frames and a clean kernel log
+    pass; a frame scrambled in blocks, a CAMNOC UBWC decode error or a
+    stall fail; an unreadable kernel log is partial."""
+    bad = []
+    w, h = 64, 48
+    smooth = bytes((x + y + rng.getrandbits(2)) & 0xff for y in range(h) for x in range(w)) + \
+        bytes([128]) * (w * h // 2)
+    blocks = bytes(rng.getrandbits(8) for _ in range(w * h)) + bytes([128]) * (w * h // 2)
+    # rows padded to a stride of 80 with noise the check must skip
+    padded = b''.join(smooth[y * w:(y + 1) * w] + bytes(rng.getrandbits(8) for _ in range(16))
+                      for y in range(h)) + bytes([128]) * (80 * h // 2)
+    for n, d, word in (('smooth.yuv', smooth, None), ('blocks.yuv', blocks, 'roughness'),
+                       ('video_w[64]_h[48]_stride[80]_slice[48]_pad.yuv', padded, None)):
+        f = os.path.join(td, n)
+        open(f, 'wb').write(d)
+        p, m = cx.video_problems(f, w, h)
+        if (word is None and (p or m['rough_max'] > 3)) or (word and not any(word in x for x in p)):
+            bad.append('camx video_problems %s: %s %s' % (n, p, m))
+    cwd = os.path.join(td, 'video-out')
+    os.makedirs(cwd, exist_ok=True)
+    cmd = fake_client(td, '[ "$MODE" = stall ] && exit 0\n'
+                          'for i in 1 2 3; do cp %s "video_w[64]_h[48]_id[$i]_stride[64]_slice[48]_x.yuv"; done\n'
+                          '[ "$MODE" = blocks ] && cp %s "video_w[64]_h[48]_id[0]_stride[64]_slice[48]_x.yuv"\n'
+                          'exit 0\n' % (os.path.join(td, 'smooth.yuv'), os.path.join(td, 'blocks.yuv')), 'video.sh')
+    dec = 'CAM_ERR: CAM-ICP: cam_ofe_cpas_cb: 56: OFE Read UBWC Decode error type=16 status=8\n'
+    mk0, kl0 = cx.mark, cx.klog
+    cx.mark = lambda what: 'MARK'
+    try:
+        for mode, klog, want, word in (('good', 'MARK\n', 'pass', 'Y roughness at most'),
+                                       ('good', 'MARK\n' + dec, 'fail', 'UBWC decode'),
+                                       ('good', dec + 'MARK\n', 'pass', '3 video frames'),
+                                       ('blocks', 'MARK\n', 'fail', 'roughness'),
+                                       ('stall', 'MARK\n', 'fail', 'no VIDEO image'),
+                                       ('good', '', 'partial', 'kernel log')):
+            b = {'modules': {'camx': True}, 'camx': {'icps': ['icp'], 'client': {
+                'cmd': cmd, 'cwd': cwd, 'env': {'MODE': mode}, 'commands': {'video-4k': {
+                    'file': 'Q', 'width': w, 'height': h, 'video': 'video_*.yuv'}}}}}
+            FakeTrace.log = [FW_GOOD]
+            cx.klog = lambda k=klog: k
+            got, why, meas = core.Runner(core.Env(b), td).call('camx.video', {})
+            if got != want or word not in why or os.listdir(cwd) or \
+                    (mode == 'blocks' and not meas.get('rough_max', 0) > cx.ROUGH_MAX):
+                bad.append('camx.video %s klog %r: got %s %s, want %s' % (mode, klog[-20:], got, why[:160], want))
+    finally:
+        cx.mark, cx.klog = mk0, kl0
     return bad
 
 

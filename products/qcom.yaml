@@ -367,6 +367,9 @@ requirements:
   QCA-019:
     title: "CamX missing ICP firmware fails cleanly"
     test: camx.no_firmware
+  QCA-020:
+    title: "CamX ISP 4K video frames intact"
+    test: camx.video
   QPL-001:
     title: "Remote processors running"
     test: platform.remoteproc
