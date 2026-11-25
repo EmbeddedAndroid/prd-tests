@@ -568,6 +568,10 @@ requirements:
     title: "CamX tuning, tools and process deliverables"
     test: platform.no_interface
     args: {feature: CamX tuning tools and process deliverables, interface: 'not a device runtime feature: release review verifies it, a device test cannot'}
+  QCA-070:
+    title: "CamX sessions beyond the driver's per-boot resource slots"
+    test: camx.power
+    args: {runs: 20}
   QPL-001:
     title: "Remote processors running"
     test: platform.remoteproc
