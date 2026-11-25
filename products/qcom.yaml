@@ -460,6 +460,22 @@ requirements:
     title: "CamX digital zoom"
     test: camx.zoom
     args: {command: zoom, zoom: 2.0}
+  QCA-043:
+    title: "CamX ISP 1080p video frames intact"
+    test: camx.video
+    args: {command: video-1080}
+  QCA-044:
+    title: "CamX ISP 4K preview"
+    test: camx.yuv
+    args: {command: preview-4k}
+  QCA-045:
+    title: "CamX high frame rate video"
+    test: camx.fps
+    args: {command: hfr}
+  QCA-046:
+    title: "CamX 4K30 video encoded on the V4L2 encoder"
+    test: camx.video_encode
+    args: {command: video-4k-enc, codec: HEVC}
   QPL-001:
     title: "Remote processors running"
     test: platform.remoteproc

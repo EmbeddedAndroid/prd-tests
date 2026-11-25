@@ -51,7 +51,8 @@ command file instead. The profile gives the client and its commands:
                  this command instead of client.fps>, phases: <n>,
                  outputs: [{kind: jpeg|yuv|video|raw|p010, prefix: P,
                             width: W, height: H, count: N, stride: S,
-                            distinct: true, gap_s: G}]}
+                            distinct: true, gap_s: G}],
+                 format: <GStreamer raw format of its video frames>}
 
 A command with phases changes a control between groups of dumped frames
 (camx.phases, camx.zoom): its images, in frame order, split into that
@@ -1709,3 +1710,69 @@ def t_zoom(env, command='zoom', zoom=2.0):
             command, zoom, meas.get('crop', '-'), meas.get('corr_centre', '-')), prob + lp, meas, notes + ln, fw)
     finally:
         run.cleanup()
+
+
+@test('camx.video_encode')
+def t_video_encode(env, command='video-4k-enc', codec='HEVC'):
+    """CamX video encoded: ISP video frames at the command's rate, encoded on the V4L2 encoder and decoded back frame for frame
+
+    The client has no encoder, so its dumped frames are encoded after
+    the capture and the result is partial at best: live recording at
+    the rate is not shown. Fails on a frame the video check refuses, a
+    reported frame rate below 90% of the command's fps, or an encode or
+    decode that does not give back every frame at the size."""
+    need(env, 'CamX video encode')
+    from tests import video as tv
+    cmd = command_cfg(env, command)
+    v = tv.V(env)
+    v.find('encoder', codec)
+    v.find('decoder', codec)
+    enc, dec, parse = v.element('encoder', codec), v.element('decoder', codec), tv.PARSE[codec]
+    w, h, rate = int(cmd['width']), int(cmd['height']), int(cmd.get('fps', 30))
+    run = run_client(env, command)
+    tmp = tempfile.mkdtemp(prefix='prd-camx-enc-')
+    try:
+        prob, meas, notes = run.problems(), run.meas(), ['frames encoded after the capture, not live']
+        pat = cmd.get('video', 'video_*.yuv')
+        files = sorted((f for f in run.files if fnmatch.fnmatch(os.path.basename(f), pat)), key=frame_id)
+        meas['video_files'] = len(files)
+        for f in files:
+            p, m = video_problems(f, w, h)
+            prob += p
+            m['rough_max'] = max(m.get('rough_max', 0), meas.get('rough_max', 0))
+            meas.update(m)
+        if len(files) < 2:
+            prob.append('%d video frames (%s), want at least 2' % (len(files), pat))
+        fpat, meas['fps'] = last_fps(env, cmd, run.log)
+        if not fpat:
+            notes.append('frame rate not measured (no client fps pattern)')
+        elif meas['fps'] is None or meas['fps'] < 0.9 * rate:
+            prob.append('fps %s below 90%% of %d (%s)' % (meas['fps'], rate, fpat))
+        if not prob:
+            for i, f in enumerate(files):
+                os.symlink(f, os.path.join(tmp, 'f%04d.yuv' % i))
+            mp4 = os.path.join(tmp, 'enc.mp4')
+            rc, txt = tv.gst(os.path.join(tmp, 'enc.log'),
+                             'multifilesrc location=%s/f%%04d.yuv index=0 stop-index=%d ! rawvideoparse '
+                             'format=%s width=%d height=%d framerate=%d/1 ! videoconvert ! video/x-raw,format=NV12'
+                             ' ! %s ! %s ! mp4mux ! filesink location=%s' % (
+                                 tmp, len(files) - 1, cmd.get('format', 'NV12').lower(), w, h, rate, enc, parse, mp4))
+            meas['encoded_bytes'] = os.path.getsize(mp4) if os.path.exists(mp4) else 0
+            if rc or not meas['encoded_bytes']:
+                prob.append('encode %s rc %d, %d bytes: %s' % (enc, rc, meas['encoded_bytes'], tv.gst_err(txt)))
+            else:
+                rc, txt = tv.gst(os.path.join(tmp, 'dec.log'), 'filesrc location=%s ! qtdemux ! %s ! %s ! '
+                                 'fakesink sync=false silent=false' % (mp4, parse, dec))
+                ow, oh, _ = tv.out_caps(txt, dec)
+                meas.update(decoded_frames=tv.frames(txt), decoded_width=ow, decoded_height=oh)
+                if rc or meas['decoded_frames'] != len(files) or (ow, oh) != (w, h):
+                    prob.append('%s gave back %d of %d frames at %sx%s (rc %d)%s' % (
+                        dec, meas['decoded_frames'], len(files), ow, oh, rc, ': ' + tv.gst_err(txt) if rc else ''))
+        lp, lm, ln, fw = log_checks(env, run)
+        meas.update(lm)
+        return isp_result('command %s: %d frames %dx%d at %s fps, %s %s bytes, %s frames decoded' % (
+            command, len(files), w, h, meas['fps'], enc, meas.get('encoded_bytes', '-'),
+            meas.get('decoded_frames', '-')), prob + lp, meas, notes + ln, fw)
+    finally:
+        run.cleanup()
+        shutil.rmtree(tmp, ignore_errors=True)

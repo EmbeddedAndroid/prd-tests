@@ -517,6 +517,7 @@ def check_camx_client():
     try:
         bad += check_camx_streams(cx, td)
         bad += check_camx_phases(cx, td)
+        bad += check_camx_encode(cx, td)
     finally:
         cx.Trace = tr0
     return bad
@@ -1118,6 +1119,56 @@ def check_camx_phases(cx, td):
         got, why, meas = core.Runner(core.Env(b), td).call('camx.zoom', {})
         if got != want or word not in why or os.listdir(cwd):
             bad.append('camx.zoom %s %r: got %s %s, want %s (%s)' % (frames, log[-30:], got, why[:200], want, word))
+    return bad
+
+
+class FakeVideo:
+    def find(self, role, codec=None):
+        return {}
+
+    def element(self, role, codec):
+        return 'fake' + role[:3]
+
+
+def check_camx_encode(cx, td):
+    """camx.video_encode with a fake codec: frames that encode and decode
+    back are partial (encoded after the capture, never a pass); a frame
+    short of the decode, a low frame rate or a scrambled frame fail."""
+    import importlib
+    tv = importlib.import_module('tests.video')
+    bad = []
+    w, h = 64, 48
+    cwd = os.path.join(td, 'enc-out')
+    os.makedirs(cwd, exist_ok=True)
+    smooth = os.path.join(td, 'enc-smooth.yuv')
+    open(smooth, 'wb').write(yuv(w, h, 0, px=lambda x, y: 60 + x + y))
+    v0, g0 = tv.V, tv.gst
+    state = {}
+
+    def gst(log, pipeline, timeout=120):
+        import re
+        m = re.search(r'filesink location=(\S+)', pipeline)
+        if m:
+            open(m.group(1), 'wb').write(b'mp4')
+            return 0, ''
+        return 0, 'last-message = chain\n' * state['frames'] + \
+            'fakedec0.GstPad:src: caps = video/x-raw, format=(string)NV12, width=(int)64, height=(int)48\n'
+    tv.V, tv.gst = (lambda env: FakeVideo()), gst
+    try:
+        for n, fps, dec, want, word in ((3, '29.9', 3, 'partial', 'not live'), (3, '29.9', 2, 'fail', '2 of 3 frames'),
+                                        (3, '20.0', 3, 'fail', 'below 90% of 30'), (1, '29.9', 1, 'fail', 'want at least 2')):
+            state['frames'] = dec
+            body = ''.join('cp %s "video_w[64]_h[48]_id[%d]_x.yuv"\n' % (smooth, i) for i in range(n))
+            cmd = fake_client(td, body + 'echo "PROFILE_VIDEO_FRAMES_PER_SECOND: %s"\nexit 0\n' % fps, 'enc.sh')
+            b = camx_board(cmd, cwd, {'e': {'file': 'Q', 'width': w, 'height': h, 'fps': 30,
+                                            'fps_re': r'PROFILE_VIDEO_FRAMES_PER_SECOND: ([\d.]+)'}})
+            FakeTrace.log = [FW_GOOD]
+            got, why, meas = core.Runner(core.Env(b), td).call('camx.video_encode', {'command': 'e'})
+            if got != want or word not in why or os.listdir(cwd):
+                bad.append('camx.video_encode %d frames fps %s dec %d: got %s %s, want %s (%s)' % (
+                    n, fps, dec, got, why[:200], want, word))
+    finally:
+        tv.V, tv.gst = v0, g0
     return bad
 
 
