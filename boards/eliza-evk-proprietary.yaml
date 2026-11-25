@@ -33,7 +33,19 @@ camx:
     cwd: /data/misc/camera
     timeout: 120
     orientation: 'orientation: (\d+)'
+    fps: 'PROFILE_PREVIEW_FRAMES_PER_SECOND: ([\d.]+)'
     errors_max: {Unknown Frame Error: 0}
+    # what camx-hal3-test prints of the result metadata after an M
+    # command (each only when it changes) and of settings it applied
+    reports:
+      exposure: 'frame:\d+ exposure value = (\d+)'
+      ae: 'frame:\d+ ae mode:AE MODE (\w+)'
+      awb: 'frame:\d+ awb mode:AWB MODE (\w+)'
+      zsl: {re: 'frame:\d+ ZSL mode:(\d+)', default: 0}
+      jpeg_quality: 'frame:\d+ jpegquality value = (\d+)'
+      active: 'active size: (\d+) x (\d+)'
+      crop: 'frame:\d+ ZOOM:crop region\[(\d+),(\d+),(\d+),(\d+)\]'
+      hdr_profile: 'video stream dynamic range profile: (\d+)'
     probe: snapshot
     commands:
       # snapshot and preview of the IMX577 through the ISP (ICP) pipeline
@@ -64,6 +76,346 @@ camx:
         width: 3840
         height: 2160
         video: video_*.yuv
+      # snapshots: 5 at once, 3 seconds apart, ZSL and non-ZSL
+      burst:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420,ssize=1920x1080,sformat=jpeg
+          W:4
+          s:5
+          W:6
+          D
+          Q
+        outputs:
+          - {kind: jpeg, prefix: snapshot, width: 1920, height: 1080, count: 5, distinct: true}
+      timelapse:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420,ssize=1920x1080,sformat=jpeg
+          W:4
+          s:1
+          W:3
+          s:1
+          W:3
+          s:1
+          W:3
+          D
+          Q
+        outputs:
+          - {kind: jpeg, prefix: snapshot, width: 1920, height: 1080, count: 3, distinct: true, gap_s: 2}
+      zsl:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420,ssize=1920x1080,sformat=jpeg,zsl=1
+          M:zslmode=1,expvalue=1
+          W:4
+          s:1
+          W:4
+          D
+          Q
+        outputs:
+          - {kind: jpeg, prefix: snapshot, width: 1920, height: 1080}
+      nzsl:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420,ssize=1920x1080,sformat=jpeg,zsl=0,forcenzslmode=1
+          M:zslmode=1,expvalue=1
+          W:4
+          s:1
+          W:4
+          D
+          Q
+        outputs:
+          - {kind: jpeg, prefix: snapshot, width: 1920, height: 1080}
+      # a snapshot while preview and video stream
+      live-snapshot:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420,vsize=1920x1080,vformat=yuv420,ssize=1920x1080,sformat=jpeg,fpsrange=30-30
+          W:4
+          P:2
+          W:1
+          s:1
+          W:4
+          D
+          Q
+        outputs:
+          - {kind: yuv, prefix: preview, width: 1920, height: 1080, count: 2}
+          - {kind: video, prefix: video, width: 1920, height: 1080, count: 2}
+          - {kind: jpeg, prefix: snapshot, width: 1920, height: 1080}
+      # a full size JPEG with the RAW10 frame of the same capture, and a
+      # YUV preview with a RAW10 snapshot (stride as measured on the EVK)
+      jpeg-raw:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420,ssize=4056x3040,sformat=jpeg,enableRawFormat=37,rsize=4056x3040
+          W:4
+          s:1
+          W:5
+          D
+          Q
+        outputs:
+          - {kind: jpeg, prefix: snapshot, width: 4056, height: 3040}
+          - {kind: raw, prefix: Raw, width: 4056, height: 3040, stride: 5120}
+      yuv-raw:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420,ssize=4056x3040,sformat=raw10
+          W:4
+          P:2
+          W:1
+          s:1
+          W:5
+          D
+          Q
+        outputs:
+          - {kind: yuv, prefix: preview, width: 1920, height: 1080, count: 2}
+          - {kind: raw, prefix: snapshot, width: 4056, height: 3040, stride: 5120}
+      # both sensors in one session: IMX577 through the ISP, OV9282 raw
+      dual:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420
+          A:id=1,psize=1280x800,pformat=raw10,ssize=1280x800,sformat=raw10
+          W:5
+          P0:2
+          P1:2
+          W:3
+          D1
+          D0
+          Q
+        outputs:
+          - {kind: yuv, prefix: preview, width: 1920, height: 1080, count: 2}
+          - {kind: raw, prefix: preview, width: 1280, height: 800, stride: 1600, count: 2}
+      # 4K and 1080p video streams with a preview from one camera
+      video-dual:
+        file: |
+          A:id=0,psize=1280x720,pformat=yuv420,vsize=3840x2160,vformat=yuv420,v2size=1920x1080,v2format=yuv420,fpsrange=30-30
+          W:4
+          P:2
+          W:6
+          D
+          Q
+        outputs:
+          - {kind: yuv, prefix: preview, width: 1280, height: 720, count: 2}
+          - {kind: video, prefix: video, width: 3840, height: 2160, count: 2}
+          - {kind: video, prefix: video, width: 1920, height: 1080, count: 2}
+      video-p010:
+        file: |
+          A:id=0,vsize=3840x2160,vformat=p010,fpsrange=30-30
+          W:4
+          P:2
+          W:6
+          D
+          Q
+        outputs:
+          - {kind: p010, prefix: video, width: 3840, height: 2160, count: 2}
+      # the HDR session mode of the client, and HLG video (vcolorimetry
+      # is in the LE.PRODUCT.11.0 client only)
+      shdr:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420,hdrmode=1
+          W:5
+          P:2
+          W:2
+          D
+          Q
+        outputs:
+          - {kind: yuv, prefix: preview, width: 1920, height: 1080, count: 2}
+      video-hlg:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420,vsize=3840x2160,vformat=p010,vcolorimetry=bt2100-hlg,fpsrange=30-30
+          W:4
+          P:2
+          W:6
+          D
+          Q
+        outputs:
+          - {kind: p010, prefix: video, width: 3840, height: 2160, count: 2}
+      # controls changed between phases of preview frames (2 per phase)
+      aec:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420
+          M:expvalue=1,isovalue=1,aemode=1
+          W:4
+          P:2
+          W:1
+          U:manual_exp_comp=12
+          W:3
+          P:2
+          W:1
+          U:manual_exp_comp=-12
+          W:3
+          P:2
+          W:1
+          D
+          Q
+        width: 1920
+        height: 1080
+        yuv: preview_*.yuv
+        phases: 3
+      manual-exp:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420
+          M:expvalue=1,aemode=1
+          W:4
+          U:manual_exp=4,manual_iso=400
+          W:3
+          P:2
+          W:1
+          U:manual_exp=30,manual_iso=400
+          W:3
+          P:2
+          W:1
+          D
+          Q
+        width: 1920
+        height: 1080
+        yuv: preview_*.yuv
+        phases: 2
+      awb:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420
+          M:awbmode=1
+          W:5
+          P:2
+          W:1
+          D
+          Q
+        width: 1920
+        height: 1080
+        yuv: preview_*.yuv
+        phases: 1
+      # manualawbmode=0 as well: only the LE.PRODUCT.11.0 client turns
+      # AWB off for a manual white balance mode
+      manual-wb:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420
+          M:awbmode=1
+          W:4
+          U:manualawbmode=0,manualwb_mode=1,manualwb_cct=2800
+          W:3
+          P:2
+          W:1
+          U:manualwb_cct=7500
+          W:3
+          P:2
+          W:1
+          D
+          Q
+        width: 1920
+        height: 1080
+        yuv: preview_*.yuv
+        phases: 2
+      # the client reads jpegquality as one character: Z is 90, 2 is 50
+      jpeg-quality:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420,ssize=1920x1080,sformat=jpeg
+          M:jpegquality=1
+          W:4
+          E:jpegquality=Z
+          W:3
+          E:jpegquality=2
+          W:3
+          D
+          Q
+        width: 1920
+        height: 1080
+        jpeg: snapshot_*.jpg
+        phases: 2
+      # pro modes: 1 manual, 3 shutter priority; a 200 ms exposure with
+      # the preview held to 33 ms
+      ev-sim:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420
+          M:expvalue=1
+          W:4
+          U:promode_select=1,manual_exp=33,manual_iso=400,preview_exposuretime_limit=33000000
+          W:3
+          P:2
+          W:1
+          U:manual_exp=200
+          W:4
+          P:2
+          W:2
+          D
+          Q
+        width: 1920
+        height: 1080
+        yuv: preview_*.yuv
+        phases: 2
+      ev-sim-sp:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420
+          M:expvalue=1
+          W:4
+          P:2
+          W:1
+          U:promode_select=3,manual_exp=200,shutter_priority_iso_limit=800,preview_exposuretime_limit=33000000
+          W:4
+          P:2
+          W:2
+          D
+          Q
+        width: 1920
+        height: 1080
+        yuv: preview_*.yuv
+        phases: 2
+      zoom:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420
+          M:zoomvalue=1
+          W:4
+          P:1
+          W:1
+          U:zoom=2.0
+          W:3
+          P:1
+          W:1
+          D
+          Q
+        width: 1920
+        height: 1080
+        yuv: preview_*.yuv
+        phases: 2
+      # video at 1080p30 and at 120 fps (constrained high speed), a 4K
+      # preview, and ten 4K30 video frames to encode
+      video-1080:
+        file: |
+          A:id=0,vsize=1920x1080,vformat=yuv420,fpsrange=30-30
+          W:4
+          P:3
+          W:6
+          D
+          Q
+        width: 1920
+        height: 1080
+        video: video_*.yuv
+      preview-4k:
+        file: |
+          A:id=0,psize=3840x2160,pformat=yuv420,fpsrange=30-30
+          W:4
+          P:2
+          W:2
+          D
+          Q
+        width: 3840
+        height: 2160
+        yuv: preview_*.yuv
+      hfr:
+        file: |
+          A:id=0,psize=1920x1080,pformat=yuv420,vsize=1920x1080,vformat=yuv420,ssize=1920x1080,sformat=jpeg,fpsrange=120-120
+          W:8
+          D
+          Q
+        fps: 120
+        fps_re: 'PROFILE_VIDEO_FRAMES_PER_SECOND: ([\d.]+)'
+      video-4k-enc:
+        file: |
+          A:id=0,vsize=3840x2160,vformat=yuv420,fpsrange=30-30
+          W:4
+          P:10
+          W:6
+          D
+          Q
+        width: 3840
+        height: 2160
+        video: video_*.yuv
+        fps: 30
+        fps_re: 'PROFILE_VIDEO_FRAMES_PER_SECOND: ([\d.]+)'
+        format: NV12
       raw-0:
         file: |
           A:id=0,psize=4056x3040,pformat=raw10,ssize=4056x3040,sformat=raw10
