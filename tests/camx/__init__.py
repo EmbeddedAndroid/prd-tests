@@ -419,8 +419,9 @@ def klog():
 
 def mark(what):
     """Write a unique line to the kernel log and return it, so the log
-    after it can be told apart (klog_after)."""
-    m = 'prd-camx: %s %d.%d' % (what, os.getpid(), int(time.time() * 1000))
+    after it can be told apart (klog_after). journald takes a leading
+    "word:" as the syslog identifier and prints only the rest."""
+    m = 'prd-camx %s %d.%d' % (what, os.getpid(), int(time.time() * 1000))
     return m if put('/dev/kmsg', m + '\n') else None
 
 
