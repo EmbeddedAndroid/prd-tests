@@ -214,3 +214,13 @@ absent:
   audio-analog-mic: the EVK has no analog codec (WCD) and no analog microphone input; its microphones are DMICs on the VA macro (an analog codec board enables this test)
   audio-i2c: the EVK has no I2C-controlled audio device; its amplifiers are controlled over SoundWire (an I2C codec or amplifier enables this test)
   camera-sensor: a camera module (the reference IMX577 on CAM0) is not fitted on every EVK
+  camera-scene-rig: the EVK films a fixed bench scene under room light; a controlled scene (a light box with set illuminants, levels and 50/60 Hz flicker, backlit, low light and high dynamic range targets) enables the scene dependent 3A, low light and HDR tests
+  camera-chart: no test chart is mounted in front of the EVK cameras (a flat field and a grid chart at a fixed distance enable the lens shading, tintless and distortion correction tests)
+  camera-motion: the EVK sits still on the bench (a motion stage, and a gyro the camera stack reads, enable the stabilization tests)
+  camera-flash: the EVK camera modules have no LED flash (their CamX module configurations name none)
+  camera-af-lens: the CamX module configurations of the IMX577 and OV9282 modules name no focus actuator, OIS or PDAF (an AF module enables these tests)
+  camera-ir: no IR or RGB-IR camera module, IR LED or IR cut filter is fitted (an IR module with its illuminator and IR cut filter enables these tests)
+  camera-gmsl: the EVK cameras are on direct CSI connectors; no GMSL deserializer or GMSL camera is connected (one enables the GMSL and CSI virtual channel tests)
+  camera-hotplug: the EVK camera connectors are not hot pluggable (a hot pluggable camera link such as GMSL enables these tests)
+  camera-special-sensor: the EVK modules are a Bayer IMX577 and a mono OV9282, with no YUV output, quad CFA, in-sensor zoom or DCG mode (a module with that sensor type enables these tests)
+  camera-dual-rig: the EVK cameras are a Bayer and a mono sensor apart, not a matched pair on a known baseline (a matched pair configured as one logical camera enables the stitching and logical camera tests)
