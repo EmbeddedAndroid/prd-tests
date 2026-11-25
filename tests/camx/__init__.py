@@ -893,8 +893,8 @@ def nv21_problems(path, w, h):
 
 
 # Y roughness (mean |difference| of neighbouring luma bytes) of real
-# scenes on the Eliza EVK at 3840x2160 is 0.3 to 9; frames scrambled in
-# blocks by an OFE that cannot decode its Bayer UBWC input are 47 to 85
+# lab scenes at 3840x2160 is 0.3 to 9; frames scrambled in blocks by an
+# OFE that cannot decode its Bayer UBWC input are 47 to 85
 ROUGH_MAX = 10
 
 
