@@ -520,6 +520,7 @@ def check_camx_client():
         bad += check_camx_encode(cx, td)
     finally:
         cx.Trace = tr0
+    bad += check_camx_hardware(td)
     return bad
 
 
@@ -1119,6 +1120,18 @@ def check_camx_phases(cx, td):
         got, why, meas = core.Runner(core.Env(b), td).call('camx.zoom', {})
         if got != want or word not in why or os.listdir(cwd):
             bad.append('camx.zoom %s %r: got %s %s, want %s (%s)' % (frames, log[-30:], got, why[:200], want, word))
+    return bad
+
+
+def check_camx_hardware(td):
+    """camx.hardware skips where the board lists the hardware absent and
+    fails where it does not."""
+    bad = []
+    for absent, want in (({'camera-flash': 'no flash'}, 'skip'), ({}, 'fail')):
+        got, why, _ = core.Runner(core.Env({'modules': {'camx': True}, 'absent': absent}), td).call(
+            'camx.hardware', {'feature': 'CamX LED flash', 'hw': 'camera-flash'})
+        if got != want or 'needs camera-flash' not in why:
+            bad.append('camx.hardware absent %s: %s %s' % (absent, got, why))
     return bad
 
 

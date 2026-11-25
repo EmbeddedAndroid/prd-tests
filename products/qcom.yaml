@@ -476,6 +476,98 @@ requirements:
     title: "CamX 4K30 video encoded on the V4L2 encoder"
     test: camx.video_encode
     args: {command: video-4k-enc, codec: HEVC}
+  QCA-047:
+    title: "CamX noise reduction controls (NR, MCTF, MFNR, MMF)"
+    test: platform.no_interface
+    args: {feature: CamX noise reduction controls, interface: the CamX test client sets no noise reduction mode or MCTF switch and reads back nothing that shows MFNR or MMF ran}
+  QCA-048:
+    title: "CamX face detection results"
+    test: platform.no_interface
+    args: {feature: CamX face detection, interface: the CamX test client can ask for face detection but prints no face results}
+  QCA-049:
+    title: "CamX super resolution (still and video)"
+    test: platform.no_interface
+    args: {feature: CamX super resolution, interface: the CamX test client has no super resolution request}
+  QCA-050:
+    title: "CamX frame rate range change within a session"
+    test: platform.no_interface
+    args: {feature: CamX dynamic frame rate, interface: the CamX test client sets the frame rate range only when it opens a camera}
+  QCA-051:
+    title: "CamX seamless sensor mode switch"
+    test: platform.no_interface
+    args: {feature: CamX seamless sensor mode switch, interface: the CamX test client has no command that changes the sensor mode within a session}
+  QCA-052:
+    title: "CamX offline reprocessing API"
+    test: platform.no_interface
+    args: {feature: CamX offline reprocessing, interface: the CamX test client has no input stream to reprocess an image through the offline ISP}
+  QCA-053:
+    title: "CamX YUV 4:2:2 output"
+    test: platform.no_interface
+    args: {feature: CamX YUV 4:2:2 output, interface: the CamX test client has no YUV 4:2:2 stream format}
+  QCA-054:
+    title: "CamX MJPEG stream"
+    test: platform.no_interface
+    args: {feature: CamX MJPEG stream, interface: the CamX test client has no MJPEG stream (JPEG is a snapshot stream only)}
+  QCA-055:
+    title: "CamX ML ISP"
+    test: platform.no_interface
+    args: {feature: CamX ML ISP, interface: the CamX test client has no ML ISP request}
+  QCA-056:
+    title: "CamX hyperlapse with frame selection"
+    test: platform.no_interface
+    args: {feature: CamX hyperlapse, interface: the CamX test client has no hyperlapse mode}
+  QCA-057:
+    title: "Camera sensor register access from user space"
+    test: platform.no_interface
+    args: {feature: Camera sensor register access, interface: no device node or CamX test client command reads or writes camera sensor registers from user space}
+  QCA-058:
+    title: "CamX 3A on a controlled scene (scene detection, flicker, low light, ADRC, metering, advanced AE and AWB)"
+    test: camx.hardware
+    args: {feature: CamX scene dependent 3A, hw: camera-scene-rig}
+  QCA-059:
+    title: "CamX HDR on a high dynamic range scene"
+    test: camx.hardware
+    args: {feature: CamX HDR, hw: camera-scene-rig}
+  QCA-060:
+    title: "CamX lens shading, tintless and distortion correction on test charts"
+    test: camx.hardware
+    args: {feature: CamX lens shading and distortion correction, hw: camera-chart}
+  QCA-061:
+    title: "CamX image stabilization"
+    test: camx.hardware
+    args: {feature: CamX image stabilization, hw: camera-motion}
+  QCA-062:
+    title: "CamX LED flash"
+    test: camx.hardware
+    args: {feature: CamX LED flash, hw: camera-flash}
+  QCA-063:
+    title: "CamX autofocus and PDAF"
+    test: camx.hardware
+    args: {feature: CamX autofocus, hw: camera-af-lens}
+  QCA-064:
+    title: "CamX IR and RGB-IR cameras, IR LED and IR cut filter"
+    test: camx.hardware
+    args: {feature: CamX IR cameras, hw: camera-ir}
+  QCA-065:
+    title: "CamX GMSL cameras and CSI virtual channels"
+    test: camx.hardware
+    args: {feature: CamX GMSL cameras, hw: camera-gmsl}
+  QCA-066:
+    title: "CamX camera hot plug"
+    test: camx.hardware
+    args: {feature: CamX camera hot plug, hw: camera-hotplug}
+  QCA-067:
+    title: "CamX YUV, quad CFA, in-sensor zoom and DCG sensors"
+    test: camx.hardware
+    args: {feature: CamX sensor types, hw: camera-special-sensor}
+  QCA-068:
+    title: "CamX stitching and logical multi-camera"
+    test: camx.hardware
+    args: {feature: CamX logical multi-camera, hw: camera-dual-rig}
+  QCA-069:
+    title: "CamX tuning, tools and process deliverables"
+    test: platform.no_interface
+    args: {feature: CamX tuning tools and process deliverables, interface: 'not a device runtime feature: release review verifies it, a device test cannot'}
   QPL-001:
     title: "Remote processors running"
     test: platform.remoteproc

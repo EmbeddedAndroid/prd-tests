@@ -250,7 +250,11 @@ dictionaries key by key.
   `camera-sensor-<connector>`. `camx.power` with `boot` and
   `camx.no_firmware` measure only the first camera use of a boot: run
   each of their requirements alone right after a reboot, in a boot of
-  its own (they are partial otherwise).
+  its own (they are partial otherwise). Camera hardware a requirement
+  needs (`camx.hardware`: `camera-scene-rig`, `camera-chart`,
+  `camera-motion`, `camera-flash`, `camera-af-lens`, `camera-ir`,
+  `camera-gmsl`, `camera-hotplug`, `camera-special-sensor`,
+  `camera-dual-rig`) is listed under `absent` where the board lacks it.
 - `modules`: optional vendor modules (`audioreach`, `camx`).
 - `targets`: numbers this board must reach, by row ID, in the target
   syntax below; they replace the row's own target.

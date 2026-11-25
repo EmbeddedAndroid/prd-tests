@@ -1776,3 +1776,10 @@ def t_video_encode(env, command='video-4k-enc', codec='HEVC'):
     finally:
         run.cleanup()
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+@test('camx.hardware')
+def t_hardware(env, feature, hw):
+    """A camera requirement that needs hardware: a skip where the board profile lists it absent, a fail where no test exercises it yet"""
+    need(env, feature)
+    raise Missing('%s: needs %s, which no test here exercises yet' % (feature, hw), hw=hw)
