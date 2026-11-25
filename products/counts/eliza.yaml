@@ -4,7 +4,7 @@
 # file against the products in CI and against the private map with
 # --map.
 map: eliza
-requirements: 203
+requirements: 319
 rows:
   GDS-007: 1
   GDS-008: 5
@@ -172,3 +172,58 @@ rows:
   QVI-013: 2
   QVI-014: 1
   QVI-015: 1
+  QCA-003: 1
+  QCA-005: 1
+  QCA-011: 4
+  QCA-012: 4
+  QCA-013: 2
+  QCA-020: 3
+  QCA-021: 1
+  QCA-022: 1
+  QCA-023: 1
+  QCA-024: 1
+  QCA-025: 1
+  QCA-026: 1
+  QCA-027: 1
+  QCA-028: 1
+  QCA-029: 2
+  QCA-030: 1
+  QCA-031: 2
+  QCA-032: 2
+  QCA-033: 2
+  QCA-034: 1
+  QCA-035: 2
+  QCA-036: 1
+  QCA-037: 1
+  QCA-038: 1
+  QCA-039: 1
+  QCA-040: 1
+  QCA-041: 1
+  QCA-042: 1
+  QCA-043: 3
+  QCA-044: 1
+  QCA-045: 2
+  QCA-046: 1
+  QCA-047: 6
+  QCA-048: 2
+  QCA-049: 3
+  QCA-050: 1
+  QCA-051: 1
+  QCA-052: 1
+  QCA-053: 1
+  QCA-054: 1
+  QCA-055: 1
+  QCA-056: 2
+  QCA-057: 1
+  QCA-058: 10
+  QCA-059: 2
+  QCA-060: 4
+  QCA-061: 3
+  QCA-062: 2
+  QCA-063: 2
+  QCA-064: 6
+  QCA-065: 2
+  QCA-066: 2
+  QCA-067: 4
+  QCA-068: 2
+  QCA-069: 8
