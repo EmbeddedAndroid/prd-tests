@@ -512,6 +512,12 @@ def check_camx_client():
     bad += check_camx_sensors(cx, td)
     bad += check_camx_isp(cx, td)
     bad += check_camx_power(cx, td)
+    tr0 = cx.Trace
+    cx.Trace = FakeTrace
+    try:
+        bad += check_camx_streams(cx, td)
+    finally:
+        cx.Trace = tr0
     return bad
 
 
@@ -924,6 +930,100 @@ def check_camx_no_firmware(cx, td, good):
                     mode, os.listdir(fwd), os.listdir(cwd)))
     finally:
         cx.klog, cx.mark = kl0, mk0
+    return bad
+
+
+def yuv(w, h, level, ca=128, cb=128, seed=1, px=None):
+    """A 4:2:0 semi-planar frame: luma level with noise (or px(x, y)), chroma ca, cb."""
+    import random
+    rng = random.Random(seed)
+    y = bytes(max(16, min(235, px(x, yy) if px else level + rng.randint(-20, 20)))
+              for yy in range(h) for x in range(w))
+    return y + bytes([ca, cb]) * (w * h // 4)
+
+
+REPORTS = {'ae': r'frame:\d+ ae mode:AE MODE (\w+)', 'zsl': {'re': r'frame:\d+ ZSL mode:(\d+)', 'default': 0},
+           'exposure': r'frame:\d+ exposure value = (\d+)', 'active': r'active size: (\d+) x (\d+)',
+           'crop': r'frame:\d+ ZOOM:crop region\[(\d+),(\d+),(\d+),(\d+)\]'}
+
+
+def camx_board(cmd, cwd, commands, env=None, **client):
+    c = dict({'cmd': cmd, 'cwd': cwd, 'env': env or {}, 'reports': REPORTS, 'commands': commands}, **client)
+    return {'modules': {'camx': True}, 'camx': {'icps': ['icp'], 'client': c}}
+
+
+def check_camx_streams(cx, td):
+    """camx.streams on a fake client: every output there and intact
+    passes; a missing stream, copies, frames too close in time, a
+    report missing, an 8-bit or misaligned P010 frame, a zero RAW frame
+    fail; unverified is partial; P010 checks on their own."""
+    bad = []
+    w, h, stride = 64, 48, 80
+    cwd = os.path.join(td, 'st-out')
+    os.makedirs(cwd, exist_ok=True)
+    src = {}
+    noise = bytes(range(256)) * 40
+    import random
+    rng = random.Random(3)
+
+    def p010(px):
+        rows = [b''.join(struct.pack('<H', px(x, y)) for x in range(w)) for y in range(h)]
+        return b''.join(rows) + struct.pack('<H', 512 << 6) * (w * h // 2)
+    for n, d in (('j1', jpeg(w, h, noise)), ('j2', jpeg(w, h, noise[1:] + b'x')), ('y', yuv(w, h, 90)),
+                 ('p10', p010(lambda x, y: (64 + (x * 37 + y * 11 + rng.randint(0, 3)) % 900) << 6)),
+                 ('p8', p010(lambda x, y: ((x * 3 + y) % 256) << 8)),
+                 ('plow', p010(lambda x, y: 64 + (x * 37 + y * 11) % 900))):
+        src[n] = os.path.join(td, n + '.bin')
+        open(src[n], 'wb').write(d)
+    src['r'], src['r0'] = os.path.join(td, 'r.raw'), os.path.join(td, 'r0.raw')
+    raw10(src['r'], w, h, stride, lambda x, y: 64 + (x * 7 + y * 13) % 600)
+    raw10(src['r0'], w, h, stride, lambda x, y: 0)
+    for n, word in (('p10', None), ('p8', '8-bit content'), ('plow', 'not P010')):
+        p = cx.p010_problems(src[n], w, h)[0]
+        if (word is None and p) or (word and not any(word in x for x in p)):
+            bad.append('camx p010_problems %s: %s' % (n, p))
+    outs = [{'kind': 'jpeg', 'prefix': 'snapshot', 'width': w, 'height': h, 'count': 2, 'distinct': True},
+            {'kind': 'yuv', 'prefix': 'preview', 'width': w, 'height': h},
+            {'kind': 'raw', 'prefix': 'Raw', 'width': w, 'height': h, 'stride': stride},
+            {'kind': 'p010', 'prefix': 'video', 'width': w, 'height': h}]
+    good = {'snapshot_w[64]_h[48]_id[1]_x.jpg': 'j1', 'snapshot_w[64]_h[48]_id[2]_x.jpg': 'j2',
+            'preview_w[64]_h[48]_id[1]_x.yuv': 'y', 'preview_w[32]_h[48]_id[1]_x.yuv': 'y',
+            'Raw_w[64]_h[48]_id[1]_x.raw': 'r', 'video_w[64]_h[48]_id[1]_x.p010': 'p10'}
+
+    def but(**kw):
+        d = dict(good)
+        for k, v in kw.items():
+            d = {n: (v if n.startswith(k) else f) for n, f in d.items() if not (n.startswith(k) and v is None)}
+        return d
+    for files, log, args, gap, want, word in (
+            (good, 'frame:2 ZSL mode:1', {'report': {'zsl': 1}}, None, 'pass', '2 jpeg snapshot 64x48'),
+            (good, 'frame:2 exposure value = 1', {'report': {'zsl': 0}}, None, 'pass', '1 raw Raw'),
+            (good, '', {'report': {'zsl': 0}}, None, 'fail', 'reported no zsl'),
+            (good, 'frame:2 ZSL mode:1', {'report': {'zsl': 0}}, None, 'fail', 'zsl reported 1, not 0'),
+            (but(Raw=None), '', {}, None, 'fail', 'raw Raw 64x48: 0 frames, want 1'),
+            (but(snapshot='j1'), '', {}, None, 'fail', 'copies'),
+            (but(Raw='r0'), '', {}, None, 'fail', 'zero pixels'),
+            (but(video='p8'), '', {}, None, 'fail', '8-bit content'),
+            (good, '', {'unverified': 'the HDR merge is not measured'}, None, 'partial', 'HDR merge'),
+            (good, '', {}, (10, 11), 'fail', 'frames 1.0 s apart'),
+            (good, '', {}, (10, 15), 'pass', '')):
+        o = [dict(x) for x in outs]
+        body = ''.join('cp %s "%s"\n' % (src[f], n) for n, f in files.items())
+        if gap:
+            o[0]['gap_s'] = 2
+            body += ''.join('touch -d @$(( $(date +%%s) + %d )) "snapshot_w[64]_h[48]_id[%d]_x.jpg"\n' % (t, i)
+                            for i, t in enumerate(gap, 1))
+        cmd = fake_client(td, body + 'printf "%%s\\n" "%s"\nexit 0\n' % log, 'st.sh')
+        b = camx_board(cmd, cwd, {'c': {'file': 'Q', 'outputs': o}})
+        FakeTrace.log = [FW_GOOD]
+        got, why, meas = core.Runner(core.Env(b), td).call('camx.streams', dict(args, command='c'))
+        if got != want or word not in why or os.listdir(cwd):
+            bad.append('camx.streams %s %s gap %s: got %s %s, want %s (%s)' % (
+                sorted(files.values()), args, gap, got, why[:220], want, word))
+    b['camx']['client']['commands']['c']['outputs'] = [{'kind': 'gif', 'prefix': 'x', 'width': 1, 'height': 1}]
+    got, why, _ = core.Runner(core.Env(b), td).call('camx.streams', {'command': 'c'})
+    if got != 'fail' or 'known kinds' not in why:
+        bad.append('camx.streams with an unknown output kind: %s %s' % (got, why))
     return bad
 
 

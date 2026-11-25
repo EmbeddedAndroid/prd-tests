@@ -234,7 +234,10 @@ dictionaries key by key.
   that makes CamX probe the sensors when nothing opened the stack yet
   (`probe`, default `snapshot`) and the patterns of its `orientation`
   (a roll, or a camera id and a roll) and `fps` reports (a command's
-  `fps_re` replaces `fps` for it); `icps` lists
+  `fps_re` replaces `fps` for it); `reports` names the patterns of what
+  the client prints of the result metadata it reads back and of the
+  settings it applied, which rows expect by name, and a command's
+  `outputs` lists every stream it writes (`camx.streams`); `icps` lists
   the ICPs whose firmware log the tests read and `firmware` their
   files; `gdsc` names the camera power domain as the genpd summary
   lists it (it must power off within `gdsc_off_s` seconds of a close,

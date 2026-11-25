@@ -370,6 +370,54 @@ requirements:
   QCA-020:
     title: "CamX ISP 4K video frames intact"
     test: camx.video
+  QCA-021:
+    title: "CamX burst snapshot"
+    test: camx.streams
+    args: {command: burst}
+  QCA-022:
+    title: "CamX timelapse snapshots"
+    test: camx.streams
+    args: {command: timelapse}
+  QCA-023:
+    title: "CamX ZSL snapshot"
+    test: camx.streams
+    args: {command: zsl, report: {zsl: 1}}
+  QCA-024:
+    title: "CamX non-ZSL snapshot"
+    test: camx.streams
+    args: {command: nzsl, report: {zsl: 0}}
+  QCA-025:
+    title: "CamX live snapshot during video"
+    test: camx.streams
+    args: {command: live-snapshot}
+  QCA-026:
+    title: "CamX JPEG and RAW from one capture"
+    test: camx.streams
+    args: {command: jpeg-raw}
+  QCA-027:
+    title: "CamX YUV preview with a Bayer RAW capture"
+    test: camx.streams
+    args: {command: yuv-raw}
+  QCA-028:
+    title: "CamX two sensors in one session"
+    test: camx.streams
+    args: {command: dual}
+  QCA-029:
+    title: "CamX two video streams from one camera"
+    test: camx.streams
+    args: {command: video-dual}
+  QCA-030:
+    title: "CamX 10-bit P010 video"
+    test: camx.streams
+    args: {command: video-p010}
+  QCA-031:
+    title: "CamX HDR sensor mode session"
+    test: camx.streams
+    args: {command: shdr, unverified: the HDR exposures and their merge are not measured without an HDR scene}
+  QCA-032:
+    title: "CamX HLG video request"
+    test: camx.streams
+    args: {command: video-hlg, report: {hdr_profile: 2}, unverified: the HLG transfer of the P010 frames is not measured}
   QPL-001:
     title: "Remote processors running"
     test: platform.remoteproc

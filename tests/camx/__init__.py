@@ -39,11 +39,22 @@ command file instead. The profile gives the client and its commands:
               (default snapshot)
       orientation: <pattern of a reported roll, or of (camera id, roll)>
       fps: <pattern of the frame rate the client reports>
+      reports: {<name>: <pattern> or {re: <pattern>, default: <value>}}
+               (what the client prints of the result metadata it reads
+               back or of a setting it applied, one value per group; the
+               default is the value of a report that only prints changes
+               and was never printed in a run that printed other reports)
       commands:
         <name>: {file: <command file text>, width: W, height: H,
                  jpeg: <glob>, yuv: <glob>, video: <glob>, raw: <glob>,
                  fps: <rate the command asks for>, fps_re: <pattern for
-                 this command instead of client.fps>}
+                 this command instead of client.fps>,
+                 outputs: [{kind: jpeg|yuv|video|raw|p010, prefix: P,
+                            width: W, height: H, count: N, stride: S,
+                            distinct: true, gap_s: G}]}
+
+A command with outputs names every stream it writes (camx.streams):
+files <prefix>_w[W]_h[H]_... of the kind's extension.
 
 A run is the client with one command file; its images are the files it
 created in cwd (removed afterwards unless PRD_CAMX_KEEP is set). The ICP
@@ -1288,3 +1299,175 @@ def t_video(env, command='video-4k'):
     return isp_result('command %s: %s video frames, Y roughness at most %s' % (
         command, meas.get('video_files', '-'), meas.get('rough_max', '-')), prob, meas, notes, fw)
 
+
+
+# What the client prints of the result metadata it reads back and of
+# the settings it applied (camx.client.reports), and the streams a
+# command writes (commands.<name>.outputs).
+def num(v):
+    for t in (int, float):
+        try:
+            return t(v)
+        except ValueError:
+            pass
+    return v
+
+
+def reports(env, log):
+    """{name: last value} of the profile's client reports in a log (a
+    tuple for a pattern with several groups). A report with a default
+    that never printed takes the default when another report printed,
+    for reports the client prints only when they change."""
+    got, defaults = {}, {}
+    for name, spec in sorted((env.cfg('camx', 'client', 'reports', default=None) or {}).items()):
+        if isinstance(spec, dict):
+            if 'default' in spec:
+                defaults[name] = spec['default']
+            spec = spec['re']
+        m = re.findall(spec, log)
+        if m:
+            got[name] = tuple(num(x) for x in m[-1]) if isinstance(m[-1], tuple) else num(m[-1])
+    if got:
+        for k, v in defaults.items():
+            got.setdefault(k, v)
+    return got
+
+
+def same(got, want, tol=0.05):
+    """Numbers within tol of want, anything else equal ignoring case."""
+    if isinstance(want, (int, float)) and isinstance(got, (int, float)):
+        return abs(got - want) <= tol * abs(want)
+    return str(got).lower() == str(want).lower()
+
+
+def need_reports(env, names):
+    have_ = env.cfg('camx', 'client', 'reports', default=None) or {}
+    for k in names:
+        if k not in have_:
+            raise Missing('the board profile names no client report %r (camx.client.reports)' % k, hw='camx')
+
+
+def report_problems(env, log, want):
+    """(problems, measurements) of the reports a row expects (name: value)
+    at the end of a client log; a report never printed is a problem."""
+    got = reports(env, log)
+    prob = []
+    for k, v in sorted((want or {}).items()):
+        if k not in got:
+            prob.append('the client reported no %s' % k)
+        elif not same(got[k], v):
+            prob.append('%s reported %s, not %s' % (k, got[k], v))
+    return prob, {'report_' + k: list(v) if isinstance(v, tuple) else v for k, v in got.items()}
+
+
+def frame_id(path):
+    m = re.search(r'_id\[(\d+)\]', os.path.basename(path))
+    return int(m.group(1)) if m else -1
+
+
+def p010_problems(path, w, h):
+    """A P010 frame: 16-bit little-endian samples with the 10 bits at the
+    top of each word (the low 6 bits zero), h luma and h/2 chroma rows of
+    at least 2w bytes, a luma plane that is not flat and carries 10 bits
+    (the two lowest of the 10 not always zero, as in an 8-bit frame
+    shifted up)."""
+    size = os.path.getsize(path)
+    pitch = size * 2 // (3 * h) if h else 0
+    meas = {'p010_bytes': size}
+    if pitch < 2 * w:
+        return ['P010 frame of %d bytes is smaller than %dx%d 16-bit 4:2:0' % (size, w, h)], meas
+    vals = []
+    with open(path, 'rb') as f:
+        for y in range(0, h, max(1, h // 64)):
+            f.seek(y * pitch)
+            row = f.read(2 * w)
+            vals += [struct.unpack_from('<H', row, i)[0] for i in range(0, len(row) - 1, 2 * max(1, w // 256))]
+    y10 = [v >> 6 for v in vals]
+    m = sum(y10) / float(len(y10))
+    st = {'p010_luma_mean': round(m, 1),
+          'p010_luma_std': round((sum((v - m) ** 2 for v in y10) / len(y10)) ** 0.5, 2),
+          'p010_low_bits': round(sum(1 for v in vals if v & 0x3f) / float(len(vals)), 3),
+          'p010_fine': round(sum(1 for v in y10 if v & 3) / float(len(y10)), 3)}
+    meas.update(st)
+    p = []
+    if st['p010_low_bits'] > 0.01:
+        p.append('%.0f%% of luma words have bits set below the top 10 (not P010)' % (100 * st['p010_low_bits']))
+    if st['p010_luma_std'] < 4:
+        p.append('flat P010 luma (std %.2f of 1023)' % st['p010_luma_std'])
+    elif st['p010_fine'] < 0.05:
+        p.append('the two lowest of the 10 luma bits are almost always zero (8-bit content)')
+    return p, meas
+
+
+EXT = {'jpeg': '.jpg', 'yuv': '.yuv', 'video': '.yuv', 'raw': '.raw', 'p010': '.p010'}
+
+
+def output_files(files, o):
+    """Files of output o: <prefix>_w[W]_h[H]_..., with the kind's extension, in frame order."""
+    size = (int(o['width']), int(o['height']))
+    return sorted((f for f in files if os.path.basename(f).startswith(o['prefix'] + '_') and
+                   f.endswith(EXT[o['kind']]) and name_size(f) == size), key=frame_id)
+
+
+def output_problems(o, path):
+    w, h, k = int(o['width']), int(o['height']), o['kind']
+    if k in ('jpeg', 'yuv', 'video', 'p010'):
+        return {'jpeg': jpeg_problems, 'yuv': nv21_problems, 'video': video_problems,
+                'p010': p010_problems}[k](path, w, h)
+    stride = int(o.get('stride', w * 5 // 4))
+    if os.path.getsize(path) < stride * h:
+        return ['%d bytes, below %dx%d RAW10 at stride %d' % (os.path.getsize(path), w, h, stride)], {}
+    st = raw10_stats(path, w, h, stride)
+    return raw_problems(st), dict(('raw_' + x, v) for x, v in st.items())
+
+
+@test('camx.streams')
+def t_streams(env, command, report=None, unverified=None):
+    """CamX streams: every output of the command's session (JPEG, YUV, video, RAW10, P010, several at once) is there and intact
+
+    The command's outputs give each stream: kind, file prefix, size, the
+    least number of frames (count), distinct (no two frames the same)
+    and gap_s (the least seconds between frames, by file time). report:
+    client reports expected at the end of the run. The error summary and
+    the ICP firmware log must be clean as for the other ISP rows.
+    unverified names what the run cannot show; the result is then
+    partial at best."""
+    need(env, 'CamX streams')
+    cmd = command_cfg(env, command)
+    outs = cmd.get('outputs') or []
+    if not outs or any(o.get('kind') not in EXT for o in outs):
+        raise Missing('the board profile gives no outputs of known kinds (%s) for CamX client command %r' % (
+            ' '.join(sorted(EXT)), command), hw='camx')
+    need_reports(env, report or {})
+    run = run_client(env, command)
+    try:
+        prob, meas, parts = run.problems(), run.meas(), []
+        for o in outs:
+            what = '%s %s %sx%s' % (o['kind'], o['prefix'], o['width'], o['height'])
+            key = what.replace(' ', '_')
+            fs = output_files(run.files, o)
+            meas['files_' + key] = len(fs)
+            parts.append('%d %s' % (len(fs), what))
+            if len(fs) < int(o.get('count', 1)):
+                prob.append('%s: %d frames, want %d' % (what, len(fs), int(o.get('count', 1))))
+            for f in fs:
+                p, m = output_problems(o, f)
+                prob += ['%s frame %d: %s' % (what, frame_id(f), x) for x in p]
+                meas.update(m)
+            if o.get('distinct') and len(set(hashlib.sha256(open(f, 'rb').read()).hexdigest()
+                                             for f in fs)) < len(fs):
+                prob.append('%s: some of the %d frames are copies of each other' % (what, len(fs)))
+            if o.get('gap_s') and len(fs) > 1:
+                t = sorted(os.path.getmtime(f) for f in fs)
+                meas['gap_s_' + key] = round(min(b - a for a, b in zip(t, t[1:])), 1)
+                if meas['gap_s_' + key] < float(o['gap_s']):
+                    prob.append('%s: frames %.1f s apart, want at least %s s' % (what, meas['gap_s_' + key],
+                                                                                 o['gap_s']))
+        p, m = report_problems(env, run.log, report)
+        meas.update(m)
+        lp, lm, notes, fw = log_checks(env, run)
+        meas.update(lm)
+        return isp_result('command %s: %s' % (command, ', '.join(parts)), prob + p + lp, meas,
+                          notes + ([unverified] if unverified else []), fw)
+    finally:
+        run.cleanup()
