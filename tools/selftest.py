@@ -793,6 +793,12 @@ CAM_INFO: CAM-ICP: cam_icp_mgr_hw_open: 200: [icpa] FW download done successfull
 CAM_INFO: CAM-ICP: __load_firmware: 100: [sec-PIL] Loaded MBN firmware from disk
 CAM_INFO: CAM-ICP: cam_icp_mgr_hw_open: 200: [icpb] FW download done successfully
 ''')
+KLOG_ICP_CK = ('''CAM_INFO: CAM-ICP: cam_icp_v2_download_fw: 1079: Loading Secure PIL : Y
+CAM_INFO: CAM-ICP: cam_icp_v2_download_fw: 1079: Loading Secure PIL : Y
+''')
+FW_CK = ''.join('kworker/u32:0-12 [001] ..... 1%03d.000000: cam_icp_fw_dbg: [%s] 0 CICP_FW_E : [%s]  HFI  :'
+                'QC_IMAGE_VERSION_STRING=CICP.FW.1.0-00001\n' % (i, n, n.upper()) for i, n in enumerate(
+                    ['icpa', 'icpb'])) + FW_GOOD
 KLOG_AUTH = ('''CAM_INFO: CAM-ICP: __load_firmware: 100: [sec-PIL] Loaded MBN firmware from disk
 CAM_INFO: CAM-ICP: cam_icp_mgr_hw_open: 200: [icpa] FW download done successfully
 CAM_ERR: CAM-ICP: cam_icp_v2_boot: 300: auth and reset failed rc=-5
@@ -861,7 +867,12 @@ def check_camx_power(cx, td):
                                     (KLOG_ICP, None, 'partial', 'firmware log was not read'),
                                     (KLOG_AUTH, FW_GOOD, 'fail', '[icpb] FW download'),
                                     (KLOG_AUTH, FW_GOOD, 'fail', 'auth and reset failures (rc -5)'),
-                                    ('', FW_GOOD, 'fail', 'not loaded through the TEE PAS')):
+                                    ('', FW_GOOD, 'fail', 'not loaded through the TEE PAS'),
+                                    (KLOG_ICP_CK, FW_CK, 'pass', 'CICP.FW.1.0-00001'),
+                                    (KLOG_ICP_CK, FW_GOOD, 'fail', '[icpa] FW download'),
+                                    (KLOG_ICP_CK, None, 'partial', 'firmware log was not read'),
+                                    (KLOG_ICP_CK.replace(': Y', ': N', 1), FW_CK, 'fail',
+                                     'not loaded through the TEE PAS')):
             cx.klog = lambda since=None: log
             FakeTrace.log = [fw]
             got, why, meas = core.Runner(core.Env(b), td).call('camx.icp_fw', {})

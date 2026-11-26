@@ -1099,12 +1099,20 @@ def t_icp_fw(env, command='snapshot'):
     run = run_client(env, command, trace=True)
     run.cleanup()
     log = klog()
+    # camera-driver logs the download per ICP and the PAS load; camera-kernel
+    # logs the download at debug level only, so its proof of a boot is the
+    # firmware version line each ICP sends in this run's firmware log
     for i in icps:
-        if not re.search(r'\[%s\] FW download done successfully' % re.escape(i), log):
-            prob.append('no "[%s] FW download done" in the kernel log' % i)
-    pas = len(re.findall(r'\[sec-PIL\] Loaded MBN firmware', log))
-    if not pas:
-        prob.append('no "[sec-PIL] Loaded MBN firmware" (not loaded through the TEE PAS)')
+        if run.fw is None and 'Loading Secure PIL : Y' in log:
+            continue  # firmware log unread: fw_notes makes the row partial
+        if not (re.search(r'\[%s\] FW download done successfully' % re.escape(i), log) or
+                re.search(r'\[%s\] \d+ \S+ : \[\w+\] +HFI +:QC_IMAGE_VERSION_STRING=' % re.escape(i),
+                          run.fw or '')):
+            prob.append('no "[%s] FW download done" in the kernel log and no firmware version from it' % i)
+    pas = len(re.findall(r'\[sec-PIL\] Loaded MBN firmware|Loading Secure PIL : Y', log))
+    if not pas or re.search(r'Loading Secure PIL : N', log):
+        prob.append('no "[sec-PIL] Loaded MBN firmware" or "Loading Secure PIL : Y" only '
+                    '(not loaded through the TEE PAS)')
     auth = re.findall(r'auth and reset failed rc=(-?\d+)', log)
     if auth:
         prob.append('%d PAS auth and reset failures (rc %s)' % (len(auth), ','.join(sorted(set(auth)))))
