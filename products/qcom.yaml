@@ -83,6 +83,10 @@ requirements:
     title: "Power and performance composition policy"
     test: platform.no_interface
     args: {feature: Power and performance composition policy, interface: a compositor policy with no defined target; Weston has no display engine aware policy}
+  QDS-019:
+    title: "Maximum frame width on one overlay pipe"
+    test: display.pipe_width
+    args: {rect: 'sspp\[\d+\]=(\S+)', kinds: {VIG: '^sspp_[0-7]$', DMA: '^sspp_(?:[89]|1[0-5])$'}, clock: debug/core_perf/max_core_clk_rate}
   QAU-001:
     title: "Compress offload (MP3)"
     test: audio.compress_codec

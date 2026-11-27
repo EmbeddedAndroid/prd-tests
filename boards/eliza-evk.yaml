@@ -195,6 +195,8 @@ platform:
 targets:
   GDS-023: {max_bpc: 10}
   GDS-037: {max_bpc: 10}
+  # DPU 12.4 SSPP line width (dpu_caps max_linewidth)
+  QDS-019: {single_pipe_width: 8192}
 
 # Hardware this board does not have, with what would enable the tests
 # that need it. A test that finds the interface missing reports skip

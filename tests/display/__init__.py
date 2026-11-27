@@ -1107,6 +1107,207 @@ def t_max_width(env):
             % (best, d.card.max_w, msg), {'width': best, 'max_width': d.card.max_w})
 
 
+def dri_debugfs(card):
+    """debugfs directory of a DRM card (mounted on demand), or None."""
+    top = '/sys/kernel/debug'
+    if not os.path.isdir(os.path.join(top, 'dri')):
+        sh('mount -t debugfs debugfs %s 2>/dev/null' % top)
+    p = os.path.join(top, 'dri', str(os.minor(os.stat(card.path).st_rdev)))
+    return p if os.path.isfile(os.path.join(p, 'state')) else None
+
+
+def plane_rects(state, plane, rect_re):
+    """Hardware pipes the driver gave one plane, one entry per source
+    rectangle: the rect_re group 1 matches in the plane's block of the
+    DRM debugfs atomic state."""
+    out, inside = [], False
+    for line in state.splitlines():
+        if not line.startswith('\t'):
+            inside = line.startswith('plane[%d]:' % plane)
+            continue
+        m = inside and re.search(rect_re, line)
+        if m:
+            out.append(m.group(1))
+    return out
+
+
+def fb_nv12_quadrants(card, w, h, ys):
+    """NV12 buffer of grey quadrants TL TR BL BR with luma ys."""
+    d = card.dumb(w, h * 3 // 2, 8)
+    p = d['pitch']
+    top = (bytes([ys[0]]) * (w // 2) + bytes([ys[1]]) * (w - w // 2)).ljust(p, b'\0')
+    bot = (bytes([ys[2]]) * (w // 2) + bytes([ys[3]]) * (w - w // 2)).ljust(p, b'\0')
+    d['map'][:p * h] = top * (h // 2) + bot * (h - h // 2)
+    d['map'][p * h:p * h + p * (h // 2)] = bytes([128]) * (p * (h // 2))
+    try:
+        return card.addfb2(w, h, NV12, [d['handle'], d['handle']], [p, p], [0, p * h]), d
+    except kms.DrmError:
+        card.free_dumb(d)
+        raise
+
+
+PW_H = 64
+PW_RGB = [RED, GREEN, BLUE, WHITE]
+PW_Y = (40, 200, 160, 80)
+
+
+def pw_pixels_ok(cap, w, kind):
+    got = sample(cap, [(10, 10), (w - 10, 10), (10, PW_H - 14), (w - 10, PW_H - 14)])
+    if kind != 'NV12':
+        return all(near(a, b) for a, b in zip(got, PW_RGB)), got
+    # grey under any matrix and range; quadrants keep their luma order
+    grey = all(max(c) - min(c) <= 8 for c in got)
+    lum = [c[1] for c in got]
+    order = sorted(range(4), key=lambda i: lum[i]) == sorted(range(4), key=lambda i: PW_Y[i])
+    apart = min(abs(lum[i] - lum[j]) for i in range(4) for j in range(i)) > 10
+    return grey and order and apart, got
+
+
+@wbtest('display.pipe_width')
+def t_pipe_width(env, rect, widths=(4096, 5120, 6144, 7680, 8192, 8200, 10240, 16382), clock=None,
+                 kinds=None):
+    """Widest source a plane scans out on one hardware pipe: sources of
+    each width composed on the writeback CRTC as RGB 1:1, RGB downscaled
+    (needs a scaler pipe) and NV12, the pipes the driver gave the plane
+    read from the DRM debugfs atomic state (rect: regex whose group 1
+    names the pipe of one source rectangle; kinds: pipe kind name to
+    regex of pipe names, labels in the reason), every capture checked
+    at four points. A commit the driver accepts must produce the right
+    frame. Negative case, with clock (debugfs file of the maximum
+    display core clock, Hz): a plane whose pixel rate exceeds it must be
+    split across pipes."""
+    d = K(env)
+    d.need_wb()
+    c = d.card
+    dbg = dri_debugfs(c)
+    if not dbg:
+        return 'partial', 'no DRM debugfs atomic state, so the pipes of a plane cannot be read'
+    crtc = d.wb_crtc()
+    pls = d.planes_for(crtc)
+    nv = next((p for p in pls if NV12 in p['formats']), None)
+    kind_of = lambda n: next((k for k, r in (kinds or {}).items() if re.search(r, n)), n)
+
+    # widest writeback output, from a 1:1 RGB layer (test commits)
+    out_max = 0
+    for w in sorted({min(x, c.max_w) for x in widths} | {1920, 2560, 3840}, reverse=True):
+        fb = fb_solid(c, w, PW_H, RED)
+        ok, _ = compose(d, [Layer(fb[0], w, PW_H, (0, 0, w, PW_H))], w=w, h=PW_H, test_only=True)
+        free(c, fb)
+        if ok:
+            out_max = w
+            break
+    if not out_max:
+        return 'fail', 'the writeback CRTC takes no 1:1 layer of 1920 px or wider'
+
+    def run(kind, w, refresh=60):
+        """(status, pipes, note): status one, split, refused, bad (accepted,
+        no frame or wrong pixels) or unseen (no pipe line in the state)."""
+        if kind == 'RGB':
+            if w > out_max:
+                return None
+            dw = w
+        else:
+            r = max(2 if kind == 'scaled' else 1, -(-w // out_max))
+            if r > 4:
+                return None
+            dw = -(-w // r)
+        pl = nv if kind == 'NV12' else pls[0]
+        if pl is None:
+            return 'refused', [], 'no plane takes NV12'
+        try:
+            fb = fb_nv12_quadrants(c, w, PW_H, PW_Y) if kind == 'NV12' else \
+                fb_quadrants(c, w, PW_H, PW_RGB)
+        except kms.DrmError as e:
+            return 'refused', [], 'buffer: %s' % e
+        seen = []
+        cap, err = compose(d, [Layer(fb[0], w, PW_H, (0, 0, dw, PW_H))], w=dw, h=PW_H,
+                           planes=[pl], refresh=refresh,
+                           during=lambda used: seen.append(
+                               plane_rects(read(os.path.join(dbg, 'state')), used[0]['id'], rect)))
+        free(c, fb)
+        pipes = seen[-1] if seen else []
+        seen_all.append(pipes)
+        if err and not seen:
+            return 'refused', [], err
+        if err:
+            # accepted, but the pipes it was given produced no frame
+            return 'bad', pipes, err
+        good, got = pw_pixels_ok(cap, dw, kind)
+        c.free_dumb(cap)
+        if not good:
+            return 'bad', pipes, 'pixels %s' % (got,)
+        if not pipes:
+            return 'unseen', pipes, 'no pipe in the debugfs state of plane %d' % pl['id']
+        return ('one' if len(pipes) == 1 else 'split'), pipes, ''
+
+    lines, best, bad, seen_all, unseen = [], {}, [], [], []
+    for kind in ('RGB', 'scaled', 'NV12'):
+        groups = []     # consecutive widths with the same outcome: [first, last, key]
+        for w in sorted(widths):
+            r = run(kind, w) if w <= c.max_w else None
+            if r is None:
+                continue
+            st, pipes, note = r
+            key = (st, '+'.join(kind_of(p) + ':' + p if kinds else p for p in pipes), note)
+            if st == 'one':
+                best[kind] = max(best.get(kind, 0), w)
+            if groups and groups[-1][2] == key:
+                groups[-1][1] = w
+            else:
+                groups.append([w, w, key])
+        row = []
+        for first, last, (st, names, note) in groups:
+            span = '%d' % first if first == last else '%d-%d' % (first, last)
+            row.append('%s %s%s%s' % (span, st, ' ' + names if names else '',
+                                      ' (%s)' % note[:60] if note else ''))
+            if st == 'bad':
+                bad.append('%s %s on %s: %s' % (kind, span, names or 'no pipe', note))
+            elif st == 'unseen':
+                unseen.append('%s %s' % (kind, span))
+        lines.append('%s: %s' % (kind, ', '.join(row) or 'no width reachable'))
+
+    neg, meas, partial = [], {}, []
+    # negative: a pixel rate above the core clock on one pipe
+    clk = read(os.path.join(dbg, clock)).strip() if clock else ''
+    if clk.isdigit() and int(clk):
+        clk = int(clk)
+        meas['max_core_clk_hz'] = clk
+        w = min(2048, out_max)
+        vt = PW_H + 30      # kms.Mode.make blanking
+        fps = -(-clk * 6 // (5 * w * vt))
+        st, pipes, note = run('RGB', w, refresh=fps)
+        neg.append('%d px at %d Hz (%d MHz on one pipe, core clock %d MHz): %s%s' % (
+            w, fps, w * vt * fps // 10 ** 6, clk // 10 ** 6, st,
+            ' ' + '+'.join(pipes) if pipes else ' (%s)' % note[:60] if note else ''))
+        if st == 'one':
+            bad.append('pixel rate above the core clock accepted on one pipe')
+        elif st == 'bad':
+            bad.append('pixel rate probe: %s' % note)
+        elif st in ('refused', 'unseen'):
+            partial.append('the pixel rate probe was %s, so no split was shown' % st)
+    elif clock:
+        partial.append('core clock not readable (%s)' % clock)
+
+    single = max(best.values()) if best else 0
+    meas.update({'single_pipe_width': single, 'writeback_max_width': out_max,
+                 'max_width': c.max_w})
+    meas.update({'%s_single_pipe_width' % k.lower(): v for k, v in best.items()})
+    reason = ('widest source on one pipe %d px (%s); writeback output up to %d px; %s; '
+              'negative: %s') % (single, ', '.join('%s %d' % kv for kv in best.items()) or 'none',
+                                 out_max, '; '.join(lines), '; '.join(neg) or 'none')
+    if bad:
+        return 'fail', reason + '; FAILED: ' + '; '.join(bad), meas
+    if not any(seen_all):
+        return 'partial', reason + '; no source showed a pipe matching %r in the debugfs state' % (
+            rect), meas
+    if unseen:
+        return 'fail', reason + '; FAILED: no pipe in the debugfs state for ' + ', '.join(
+            unseen), meas
+    if partial:
+        return 'partial', reason + '; ' + '; '.join(partial), meas
+    return ('pass' if single else 'fail'), reason, meas
+
+
 ROT_EXP = {'rotate-0': [RED, GREEN, BLUE, WHITE], 'reflect-x': [GREEN, RED, WHITE, BLUE],
            'reflect-y': [BLUE, WHITE, RED, GREEN], 'rotate-180': [WHITE, BLUE, GREEN, RED],
            'rotate-90': [GREEN, WHITE, RED, BLUE], 'rotate-270': [BLUE, RED, WHITE, GREEN]}

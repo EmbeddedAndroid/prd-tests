@@ -92,6 +92,11 @@ KMS tests need DRM master: the runner stops the compositor unit named in
 the profile (default `weston`) for them and starts it again for the
 Wayland tests and at exit.
 
+`display.pipe_width` reads which hardware pipes the driver gave a plane
+from the DRM debugfs atomic state (`/sys/kernel/debug/dri/<minor>/state`,
+debugfs mounted on demand); the row names the driver's pipe lines, so
+the test itself stays generic.
+
 In LAVA (host side, python3 with PyYAML):
 
     sh tools/fetch-vectors.sh vectors           # optional: video conformance vectors
