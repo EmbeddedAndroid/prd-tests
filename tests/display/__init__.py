@@ -301,10 +301,12 @@ def plane_req(p, crtc, L, card):
 
 
 def compose_once(d, layers, crtc_extra=None, wb_fmt=XR24, w=WB_W, h=WB_H, test_only=False,
-                 planes=None):
+                 planes=None, refresh=60, during=None):
     """Commit layers on the writeback CRTC and capture the output.
-    planes picks the planes in layer order instead of planes_for.
-    Returns (capture dumb buffer, None) or (None, error string)."""
+    planes picks the planes in layer order instead of planes_for;
+    during(planes used) runs once the commit is accepted, before the
+    capture is waited for. Returns (capture dumb buffer, None) or
+    (None, error string)."""
     card = d.card
     crtc = d.wb_crtc()
     if crtc is None:
@@ -312,7 +314,7 @@ def compose_once(d, layers, crtc_extra=None, wb_fmt=XR24, w=WB_W, h=WB_H, test_o
     cand = planes or d.planes_for(crtc)
     if len(layers) > len(cand):
         return None, 'only %d planes on the writeback CRTC' % len(cand)
-    mblob = card.create_blob(kms.Mode.make(w, h).raw)
+    mblob = card.create_blob(kms.Mode.make(w, h, refresh).raw)
     if wb_fmt == NV12:
         cap = card.dumb(w, h * 3 // 2, 8)
         cap['map'][:] = b'\x5a' * cap['size']
@@ -358,6 +360,8 @@ def compose_once(d, layers, crtc_extra=None, wb_fmt=XR24, w=WB_W, h=WB_H, test_o
         try:
             card.atomic(req, kms.ALLOW_MODESET | (kms.TEST_ONLY if test_only else 0))
             if not test_only:
+                if during:
+                    during(used)
                 st = kms.wait_fence(fence.value, 2.0)
                 if st != 1:
                     err = 'writeback fence %s' % ('did not signal within 2 s' if st == 0 else
@@ -398,12 +402,13 @@ def untouched(cap, w, h):
 
 
 def compose(d, layers, crtc_extra=None, wb_fmt=XR24, w=WB_W, h=WB_H, test_only=False, tries=3,
-            planes=None):
+            planes=None, refresh=60, during=None):
     """compose_once, repeated when the fence signalled but the frame was
     not written (the capture still holds its fill pattern). Retries are
     counted in d.wb_empty; tests made with wbtest report them."""
     for i in range(tries):
-        cap, err = compose_once(d, layers, crtc_extra, wb_fmt, w, h, test_only, planes)
+        cap, err = compose_once(d, layers, crtc_extra, wb_fmt, w, h, test_only, planes, refresh,
+                                during)
         if err or test_only or not untouched(cap, w, h):
             return cap, err
         d.wb_empty += 1
