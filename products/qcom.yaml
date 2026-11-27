@@ -572,6 +572,9 @@ requirements:
     title: "CamX sessions beyond the driver's per-boot resource slots"
     test: camx.power
     args: {runs: 20}
+  QCA-071:
+    title: "CamX ISP preview colour balance (no colour cast)"
+    test: camx.color
   QPL-001:
     title: "Remote processors running"
     test: platform.remoteproc

@@ -664,14 +664,20 @@ def check_camx_isp(cx, td):
                  ('good.yuv', bytes(rng.getrandbits(8) for _ in range(64 * 48)) + bytes([128]) * (64 * 24)),
                  ('flat.yuv', bytes([16]) * (64 * 72)),
                  ('cut.yuv', bytes(rng.getrandbits(8) for _ in range(64 * 40)) + bytes(64 * 32)),
-                 ('short.yuv', bytes(100))):
+                 ('short.yuv', bytes(100)),
+                 ('green.yuv', bytes(rng.getrandbits(8) for _ in range(64 * 48)) + bytes([118]) * (64 * 24)),
+                 ('tint.yuv', bytes(rng.getrandbits(8) for _ in range(64 * 48)) +
+                  b''.join((bytes([100]) * 16 + bytes([128]) * 48) if r < 6 else bytes([128]) * 64
+                           for r in range(24)))):
         imgs[n] = os.path.join(td, n)
         open(imgs[n], 'wb').write(d)
     for n, check, word in (('good.jpg', cx.jpeg_problems, None), ('flat.jpg', cx.jpeg_problems, 'flat'),
                            ('size.jpg', cx.jpeg_problems, 'not 64x48'), ('good.yuv', cx.nv21_problems, None),
                            ('flat.yuv', cx.nv21_problems, 'flat luma'),
                            ('cut.yuv', cx.nv21_problems, 'not fully written'),
-                           ('short.yuv', cx.nv21_problems, 'bytes')):
+                           ('short.yuv', cx.nv21_problems, 'bytes'), ('good.yuv', cx.color_problems, None),
+                           ('green.yuv', cx.color_problems, 'colour cast'),
+                           ('tint.yuv', cx.color_problems, 'local colour cast')):
         p = check(imgs[n], 64, 48)[0]
         if (word is None and p) or (word and not any(word in x for x in p)):
             bad.append('camx %s: %s' % (n, p))
@@ -686,7 +692,7 @@ def check_camx_isp(cx, td):
     tr0 = cx.Trace
     cx.Trace = FakeTrace
     try:
-        for t in ('camx.snapshot', 'camx.yuv', 'camx.isp_log'):
+        for t in ('camx.snapshot', 'camx.yuv', 'camx.color', 'camx.isp_log'):
             for mode, fw, want in (('good', FW_GOOD, 'pass'), ('stall', FW_STALL, 'fail'),
                                    ('good', FW_STALL, 'fail'), ('good', None, 'partial')):
                 b = {'modules': {'camx': True}, 'camx': {'icps': ['icp'], 'client': {

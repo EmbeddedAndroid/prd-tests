@@ -909,6 +909,55 @@ def nv21_problems(path, w, h):
     return p, meas
 
 
+
+def chroma_stats(path, w, h, stride, uvoff, grid=4, step=8):
+    """(mean of each chroma byte minus 128, largest |mean| of either
+    chroma byte over a grid x grid block layout) of a 4:2:0 frame with
+    interleaved chroma, sampled every step pixels."""
+    with open(path, 'rb') as f:
+        f.seek(uvoff)
+        uv = f.read(stride * (h // 2))
+    tot, n, blk = [0, 0], 0, {}
+    for y in range(0, h // 2, step // 2):
+        for x in range(0, w // 2, step // 2):
+            a, b = uv[y * stride + 2 * x] - 128, uv[y * stride + 2 * x + 1] - 128
+            tot[0] += a
+            tot[1] += b
+            n += 1
+            s = blk.setdefault((y * grid // (h // 2), x * grid // (w // 2)), [0, 0, 0])
+            s[0] += a
+            s[1] += b
+            s[2] += 1
+    worst = max(max(abs(s[0]), abs(s[1])) / float(s[2]) for s in blk.values())
+    return (round(tot[0] / float(n), 2), round(tot[1] / float(n), 2)), round(worst, 2)
+
+
+# Grey world bounds for a mixed indoor scene: the LE.PRODUCT.11.0 IMX577
+# preview of the Eliza lab rack has a whole frame chroma mean of
+# (-3.7, -4.1) and a worst 4x4 block of 11.3; a preview whose Bayer path
+# skipped white balance (green) has (-10.9, -8.5) and 28.4
+COLOR_MAX_MEAN = 6.0
+COLOR_MAX_BLOCK = 14.0
+
+
+def color_problems(path, w, h):
+    """A preview frame (the preview checks) without a colour cast: chroma
+    means within COLOR_MAX_MEAN over the frame and COLOR_MAX_BLOCK over
+    every block."""
+    p, meas = nv21_problems(path, w, h)
+    if p:
+        return p, meas
+    m = re.search(r'_stride\[(\d+)\]', os.path.basename(path))
+    stride = w if meas['yuv_bytes'] == w * h * 3 // 2 else int(m.group(1))
+    mean, worst = chroma_stats(path, w, h, stride, meas['yuv_bytes'] * 2 // 3)
+    meas.update({'chroma_mean': list(mean), 'chroma_block_max': worst})
+    if max(abs(mean[0]), abs(mean[1])) > COLOR_MAX_MEAN:
+        p.append('%s: chroma mean %s beyond +-%s (colour cast)' % (os.path.basename(path), list(mean), COLOR_MAX_MEAN))
+    if worst > COLOR_MAX_BLOCK:
+        p.append('%s: a block chroma mean of %.1f beyond %s (local colour cast)' % (
+            os.path.basename(path), worst, COLOR_MAX_BLOCK))
+    return p, meas
+
 # Y roughness (mean |difference| of neighbouring luma bytes) of real
 # lab scenes at 3840x2160 is 0.3 to 9; frames scrambled in blocks by an
 # OFE that cannot decode its Bayer UBWC input are 47 to 85
@@ -955,7 +1004,7 @@ def isp(env, name, kinds, trace=True):
         w, h = int(cmd['width']), int(cmd['height'])
         prob, meas, notes = run.problems(), run.meas(), []
         for k, default, check in (('jpeg', '*.jpg', jpeg_problems), ('yuv', '*.yuv', nv21_problems),
-                                  ('video', 'video_*.yuv', video_problems)):
+                                  ('video', 'video_*.yuv', video_problems), ('color', '*.yuv', color_problems)):
             if k not in kinds:
                 continue
             files = [f for f in run.files if fnmatch.fnmatch(os.path.basename(f), cmd.get(k, default))]
@@ -1024,6 +1073,16 @@ def t_yuv(env, command='snapshot'):
     return isp_result('command %s: preview %s bytes, luma std %s' % (
         command, meas.get('yuv_bytes', '-'), meas.get('luma_std', '-')), prob, meas, notes, fw)
 
+
+
+
+@test('camx.color')
+def t_color(env, command='snapshot'):
+    """CamX ISP preview colour balance: grey world chroma of the preview frame, whole frame and per block (COLOR_*)"""
+    need(env, 'CamX ISP preview')
+    prob, meas, notes, fw = isp(env, command, ('color',))
+    return isp_result('command %s: chroma mean %s, worst block %s' % (
+        command, meas.get('chroma_mean', '-'), meas.get('chroma_block_max', '-')), prob, meas, notes, fw)
 
 @test('camx.isp_log')
 def t_isp_log(env, command='snapshot'):
